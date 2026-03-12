@@ -29,6 +29,15 @@ from agent.planner import generate_plan
 from gws import drive_files_list
 from database import init_db
 from database.drive_files import upsert_drive_files, get_drive_files_from_db
+from database.chat_sessions import (
+    create_session,
+    create_session_if_needed,
+    update_session_title,
+    add_message,
+    list_sessions,
+    get_session_with_messages,
+    delete_session,
+)
 from icon.icons import ensure_index, get_icon_by_name, svg_to_png_bytes
 from fastapi.responses import Response
 
@@ -57,15 +66,24 @@ async def plan(request: dict):
     if not topic:
         raise HTTPException(status_code=400, detail="topic required")
 
+    session_id = create_session_if_needed(request.get("sessionId"))
+    add_message(session_id, "user", topic)
+    update_session_title(session_id, topic[:100] if len(topic) > 100 else topic)
+
     try:
         plan_obj, raw = generate_plan(topic)
+        plan_json = json.dumps(plan_obj) if plan_obj else None
+        add_message(session_id, "assistant", raw, plan_json=plan_json)
         return {
+            "sessionId": session_id,
             "plan": plan_obj,
             "content": raw,
             "hasPlan": plan_obj is not None,
         }
     except Exception as e:
+        add_message(session_id, "assistant", f"Error: {e}")
         return {
+            "sessionId": session_id,
             "error": str(e),
             "plan": None,
             "content": f"Error: {e}",
@@ -80,6 +98,7 @@ async def execute_plan(request: dict):
     if not plan or not isinstance(plan, dict):
         raise HTTPException(status_code=400, detail="plan object required")
 
+    session_id = create_session_if_needed(request.get("sessionId"))
     title = plan.get("title", "Untitled Presentation")
     slides = plan.get("slides", [])
     aesthetics = plan.get("aesthetics", {})
@@ -90,7 +109,6 @@ async def execute_plan(request: dict):
             return s
         return s.replace("\\n", "\n").replace("\\r", "\r")
 
-    # Build a synthetic user message that instructs the agent to create the presentation from the plan
     plan_text = f"Create a Google Slides presentation from this plan. Title: {title}\n\n"
     plan_text += f"Theme/aesthetics: {aesthetics.get('theme', '')}. Primary color: {aesthetics.get('primary_color', '')}. Icon style: {aesthetics.get('suggested_icons_style', '')}.\n\n"
     plan_text += "Slides to create:\n"
@@ -102,25 +120,29 @@ async def execute_plan(request: dict):
         if s.get("elements"):
             plan_text += f"Elements: {json.dumps(s['elements'])}\n"
 
+    add_message(session_id, "user", f"Build presentation: {title}")
     messages = [{"role": "user", "content": plan_text}]
     current_file = request.get("currentFile")
 
     try:
         result = run_agent(messages, current_file=current_file)
+        content = str(result["text"])
+        add_message(session_id, "assistant", content)
         return {
-            "message": {"role": "assistant", "content": str(result["text"])},
+            "sessionId": session_id,
+            "message": {"role": "assistant", "content": content},
             "toolCalls": [
                 {"name": str(t["name"]), "args": _json_safe(t.get("args", {}))}
                 for t in result.get("tool_calls", [])
             ],
         }
     except Exception as e:
+        err_msg = f"Error: {e}. Ensure gws is installed and authenticated (gws auth login -s slides,drive)"
+        add_message(session_id, "assistant", err_msg)
         return {
+            "sessionId": session_id,
             "error": str(e),
-            "message": {
-                "role": "assistant",
-                "content": f"Error: {e}. Ensure gws is installed and authenticated (gws auth login -s slides,drive)",
-            },
+            "message": {"role": "assistant", "content": err_msg},
             "toolCalls": [],
         }
 
@@ -131,25 +153,60 @@ async def chat(request: dict):
     if not messages:
         raise HTTPException(status_code=400, detail="messages array required")
     current_file = request.get("currentFile")
+    session_id = create_session_if_needed(request.get("sessionId"))
+
+    last_user = next((m for m in reversed(messages) if m.get("role") == "user"), None)
+    if last_user:
+        user_content = last_user.get("content", "")
+        if isinstance(user_content, list):
+            user_content = user_content[0].get("text", "") if user_content else ""
+        add_message(session_id, "user", str(user_content))
+        update_session_title(session_id, (str(user_content)[:100]) or "New chat")
 
     try:
         result = run_agent(messages, current_file=current_file)
+        content = str(result["text"])
+        add_message(session_id, "assistant", content)
         return {
-            "message": {"role": "assistant", "content": str(result["text"])},
+            "sessionId": session_id,
+            "message": {"role": "assistant", "content": content},
             "toolCalls": [
                 {"name": str(t["name"]), "args": _json_safe(t.get("args", {}))}
                 for t in result.get("tool_calls", [])
             ],
         }
     except Exception as e:
+        err_msg = f"Error: {e}. Ensure gws is installed and authenticated (gws auth login -s slides,drive)"
+        add_message(session_id, "assistant", err_msg)
         return {
+            "sessionId": session_id,
             "error": str(e),
-            "message": {
-                "role": "assistant",
-                "content": f"Error: {e}. Ensure gws is installed and authenticated (gws auth login -s slides,drive)",
-            },
+            "message": {"role": "assistant", "content": err_msg},
             "toolCalls": [],
         }
+
+
+@app.get("/api/chat/sessions")
+async def get_chat_sessions(limit: int = 50):
+    """List chat sessions, most recent first."""
+    return {"sessions": list_sessions(limit=limit)}
+
+
+@app.get("/api/chat/sessions/{session_id:int}")
+async def get_chat_session(session_id: int):
+    """Get a chat session with all messages (content + plan, no tools)."""
+    session = get_session_with_messages(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
+@app.delete("/api/chat/sessions/{session_id:int}")
+async def delete_chat_session(session_id: int):
+    """Delete a chat session and its messages."""
+    if not delete_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"ok": True}
 
 
 @app.get("/api/tools")

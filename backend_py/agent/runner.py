@@ -156,10 +156,23 @@ def _preview(s: str, max_len: int = 300) -> str:
     return s[:max_len] + "..." if len(s) > max_len else s
 
 
+def _normalize_text_newlines(text: str) -> str:
+    """Replace literal \\u000A and \\n with real newlines in insertText."""
+    if not isinstance(text, str):
+        return text
+    return text.replace("\\u000A", "\n").replace("\u000A", "\n").replace("\\n", "\n").replace("\\r", "\r")
+
+
 def _normalize_batch_requests(obj):
-    """Recursively convert whole-number floats to ints (API expects integer for insertionIndex, etc)."""
+    """Recursively convert whole-number floats to ints, and normalize insertText text (\\u000A -> newline)."""
     if isinstance(obj, dict):
-        return {k: _normalize_batch_requests(v) for k, v in obj.items()}
+        out = {}
+        for k, v in obj.items():
+            if k == "insertText" and isinstance(v, dict) and "text" in v:
+                out[k] = {**v, "text": _normalize_text_newlines(v["text"])}
+            else:
+                out[k] = _normalize_batch_requests(v)
+        return out
     if isinstance(obj, list):
         return [_normalize_batch_requests(v) for v in obj]
     if isinstance(obj, float) and obj == int(obj):

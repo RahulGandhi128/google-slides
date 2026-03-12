@@ -68,3 +68,16 @@ def init_db():
         """))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_drive_files_modified ON drive_files(modified_time)"))
         conn.commit()
+
+    # Migrations: add new columns if missing (for existing DBs)
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE chat_sessions ADD COLUMN title TEXT DEFAULT 'New chat'"))
+            conn.commit()
+        except Exception:
+            pass  # column may already exist
+        try:
+            conn.execute(text("ALTER TABLE chat_messages ADD COLUMN plan_json TEXT"))
+            conn.commit()
+        except Exception:
+            pass

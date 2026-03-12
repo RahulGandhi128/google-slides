@@ -181,51 +181,27 @@ def rebuild_index() -> None:
 
 def svg_to_png_bytes(svg: str, output_width: int = 64, output_height: int = 64) -> bytes:
     """
-    Convert SVG string to PNG bytes. Primary: svglib + reportlab (no system deps).
-    Fallback: cairosvg if svglib fails (e.g. complex SVGs).
+    Convert SVG string to PNG bytes using resvg_py (Rust backend, no Cairo).
     Returns PNG bytes suitable for Slides API.
     """
-    import tempfile
-    from io import BytesIO, StringIO
+    from io import BytesIO
 
-    # Primary: svglib + reportlab (easiest to install, no system deps)
     try:
-        from svglib.svglib import svg2rlg
-        from reportlab.graphics import renderPM
+        import resvg_py
         from PIL import Image
 
-        drawing = svg2rlg(StringIO(svg))
-        if drawing is None:
-            raise RuntimeError("svglib could not parse SVG")
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-            try:
-                renderPM.drawToFile(drawing, tmp.name, fmt="PNG")
-                with Image.open(tmp.name) as img:
-                    img = img.resize((output_width, output_height), Image.Resampling.LANCZOS)
-                    buf = BytesIO()
-                    img.save(buf, "PNG")
-                    return buf.getvalue()
-            finally:
-                try:
-                    os.unlink(tmp.name)
-                except OSError:
-                    pass
+        png_bytes = resvg_py.svg_to_bytes(svg_string=svg)
+        img = Image.open(BytesIO(png_bytes))
+        img = img.resize((output_width, output_height), Image.Resampling.LANCZOS)
+        buf = BytesIO()
+        img.save(buf, "PNG")
+        return buf.getvalue()
+    except ImportError:
+        raise RuntimeError(
+            "resvg_py required for icon-to-slide. Run: pip install resvg_py Pillow"
+        )
     except Exception as e:
-        # Fallback: cairosvg
-        try:
-            import cairosvg
-            return cairosvg.svg2png(
-                bytestring=svg.encode("utf-8"),
-                output_width=output_width,
-                output_height=output_height,
-            )
-        except ImportError:
-            raise RuntimeError(
-                f"SVG to PNG failed: {e}. Install svglib+reportlab: pip install svglib reportlab. "
-                "Or cairosvg as fallback: pip install cairosvg"
-            ) from e
-        except Exception as e2:
-            raise RuntimeError(f"SVG to PNG conversion failed: {e} (svglib), {e2} (cairo)") from e2
+        raise RuntimeError(f"SVG to PNG conversion failed: {e}") from e
 
 
 def get_icon_by_name(name: str) -> dict | None:

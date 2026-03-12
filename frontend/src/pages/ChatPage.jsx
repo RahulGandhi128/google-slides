@@ -149,10 +149,12 @@ function ChatPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isExecutingPlan, setIsExecutingPlan] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [driveFiles, setDriveFiles] = useState([]);
   const [driveFilesLoading, setDriveFilesLoading] = useState(false);
   const [planMode, setPlanMode] = useState(false);
+  const [sessionId, setSessionId] = useState(null);
+  const [chatSessions, setChatSessions] = useState([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -170,6 +172,51 @@ function ChatPage() {
       setSelectedFile(null);
     }
   }, [searchParams]);
+
+  const fetchChatSessions = async () => {
+    setSessionsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/chat/sessions`);
+      const data = await res.json();
+      if (res.ok && data.sessions) {
+        setChatSessions(data.sessions);
+      }
+    } catch (err) {
+      console.error('Failed to fetch chat sessions:', err);
+    } finally {
+      setSessionsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchChatSessions();
+  }, []);
+
+  const loadSession = async (id) => {
+    try {
+      const res = await fetch(`${API_BASE}/chat/sessions/${id}`);
+      const data = await res.json();
+      if (res.ok && data.messages) {
+        setSessionId(data.id);
+        setMessages(
+          data.messages.map((m) => ({
+            role: m.role,
+            content: m.content,
+            plan: m.plan,
+            hasPlan: m.hasPlan,
+          }))
+        );
+      }
+    } catch (err) {
+      console.error('Failed to load session:', err);
+    }
+  };
+
+  const startNewChat = () => {
+    setSessionId(null);
+    setMessages([]);
+    fetchChatSessions();
+  };
 
   const updateUrlForFile = (file) => {
     if (!file) {
@@ -236,10 +283,14 @@ function ChatPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           plan,
+          sessionId,
           currentFile: selectedFile ? { id: selectedFile.id, name: selectedFile.name, mimeType: selectedFile.mimeType } : null,
         }),
       });
       const data = await res.json();
+
+      if (data.sessionId) setSessionId(data.sessionId);
+      fetchChatSessions();
 
       setMessages((prev) => {
         const next = [...prev];
@@ -286,9 +337,11 @@ function ChatPage() {
         const res = await fetch(`${API_BASE}/plan`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ topic: text }),
+          body: JSON.stringify({ topic: text, sessionId }),
         });
         const data = await res.json();
+        if (data.sessionId) setSessionId(data.sessionId);
+        fetchChatSessions();
         setMessages((prev) => [
           ...prev,
           {
@@ -310,6 +363,7 @@ function ChatPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             messages: chatMessages,
+            sessionId,
             currentFile: selectedFile ? { id: selectedFile.id, name: selectedFile.name, mimeType: selectedFile.mimeType } : null,
           }),
         });
@@ -319,6 +373,9 @@ function ChatPage() {
         if (!res.ok) {
           throw new Error(data.error || 'Request failed');
         }
+
+        if (data.sessionId) setSessionId(data.sessionId);
+        fetchChatSessions();
 
         setMessages((prev) => [
           ...prev,
@@ -363,31 +420,45 @@ function ChatPage() {
   };
 
   return (
-    <div className="app assistant-page">
-      <header className="header">
-        <div className="header-logo">
-          <span className="logo-icon">G</span>
-          <h1>GWS Slides Assistant</h1>
-          <Link to="/" className="drive-nav-link">Drive</Link>
-          <button
-            type="button"
-            className="sidebar-toggle-btn"
-            onClick={() => setSidebarOpen((o) => !o)}
-            title={sidebarOpen ? 'Hide file panel' : 'Show file panel'}
-            aria-label={sidebarOpen ? 'Hide file panel' : 'Show file panel'}
-          >
-            {sidebarOpen ? '◀' : '▶'}
-          </button>
-        </div>
-        <p className="header-subtitle">
-          Manage Google Slides, Drive & Workspace from chat — powered by gws CLI
-        </p>
-      </header>
-
+    <div className="app assistant-page chatgpt-layout">
       <div className="chat-layout">
-        {sidebarOpen && (
-          <aside className="chat-sidebar">
-            <div className="chat-sidebar-header">
+        <aside className="chat-sidebar">
+          <Link to="/" className="chat-sidebar-logo" title="Home">
+            <span className="logo-icon">G</span>
+          </Link>
+          <div className="chat-sidebar-header">
+            <h3>Chat history</h3>
+          </div>
+            <div className="chat-history-section">
+              <button
+                type="button"
+                className="chat-sidebar-change-btn"
+                onClick={startNewChat}
+              >
+                New chat
+              </button>
+              {sessionsLoading ? (
+                <p className="chat-sidebar-empty">Loading…</p>
+              ) : chatSessions.length > 0 ? (
+                <ul className="chat-history-list">
+                  {chatSessions.map((s) => (
+                    <li key={s.id}>
+                      <button
+                        type="button"
+                        className={`chat-sidebar-file-item ${sessionId === s.id ? 'selected' : ''}`}
+                        onClick={() => loadSession(s.id)}
+                        title={s.title}
+                      >
+                        {s.title || 'New chat'}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="chat-sidebar-empty">No chats yet</p>
+              )}
+            </div>
+            <div className="chat-sidebar-header chat-sidebar-divider">
               <h3>Current file</h3>
             </div>
             {selectedFile ? (
@@ -467,9 +538,9 @@ function ChatPage() {
                 )}
               </div>
             )}
-          </aside>
-        )}
+        </aside>
         <main className="chat-container">
+          <div className="chat-scroll">
           {messages.length === 0 ? (
             <div className="welcome">
               <div className="welcome-card">
@@ -550,10 +621,8 @@ function ChatPage() {
               <div ref={messagesEndRef} />
             </div>
           )}
-        </main>
-      </div>
-
-      <div className="input-area-floating">
+          </div>
+          <div className="input-area-inline">
         <div className="input-inbox">
           <div className="input-inner">
             <textarea
@@ -598,6 +667,8 @@ function ChatPage() {
             </button>
           </div>
         </div>
+          </div>
+        </main>
       </div>
     </div>
   );
