@@ -1,0 +1,29 @@
+{
+  "files": [
+    {
+      "id": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms",
+      "name": "My Presentation",
+      "mimeType": "application/vnd.google-apps.presentation",
+      "modifiedTime": "2024-01-15T10:30:00.000Z",
+      "webViewLink": "https://docs.google.com/presentation/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit",
+      "iconLink": "https://drive-thirdparty.googleusercontent.com/16/type/application/vnd.google-apps.presentation"
+    },
+    {
+      "id": "1abc123xyz",
+      "name": "Budget 2024",
+      "mimeType": "application/vnd.google-apps.spreadsheet",
+      "modifiedTime": "2024-01-10T14:22:00.000Z",
+      "webViewLink": "https://docs.google.com/spreadsheets/d/1abc123xyz/edit",
+      "iconLink": "https://drive-thirdparty.googleusercontent.com/16/type/application/vnd.google-apps.spreadsheet"
+    },
+    {
+      "id": "1def456uvw",
+      "name": "Meeting Notes",
+      "mimeType": "application/vnd.google-apps.document",
+      "modifiedTime": "2024-01-08T09:15:00.000Z",
+      "webViewLink": "https://docs.google.com/document/d/1def456uvw/edit",
+      "iconLink": "https://drive-thirdparty.googleusercontent.com/16/type/application/vnd.google-apps.document"
+    }
+  ],
+  "nextPageToken": "~!!~AI9F7Vy..."
+}

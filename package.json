@@ -1,0 +1,16 @@
+{
+  "name": "gws-slides-google-cli",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chat assistant for Google Slides & Workspace using gws CLI + MCP",
+  "scripts": {
+    "backend": "cd backend_py && python run.py",
+    "frontend": "cd frontend && npm run dev",
+    "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
+    "start": "cd backend_py && python run.py",
+    "start:frontend": "cd frontend && npm run dev"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

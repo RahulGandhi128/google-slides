@@ -1,0 +1,34 @@
+node_modules/
+.env
+*.log
+.DS_Store
+dist/
+build/
+
+# Environment
+.env
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+
+# Database
+*.db
+database/*.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Icon index (can be rebuilt)
+backend_py/icon/faiss_icon_index/

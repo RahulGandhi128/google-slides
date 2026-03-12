@@ -1,0 +1,216 @@
+"""
+GWS Slides Assistant - FastAPI Backend
+"""
+import json
+import logging
+import os
+
+from dotenv import load_dotenv
+from contextlib import asynccontextmanager
+
+# Load .env from backend_py or project root
+load_dotenv()
+load_dotenv("../.env")
+
+
+def _json_safe(obj):
+    """Return JSON-serializable copy; protobuf can leak into tool args."""
+    try:
+        return json.loads(json.dumps(obj, default=str))
+    except (TypeError, ValueError):
+        return {}
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+
+from agent import run_agent
+from agent.planner import generate_plan
+from gws import drive_files_list
+from database import init_db
+from database.drive_files import upsert_drive_files, get_drive_files_from_db
+from icon.icons import ensure_index, get_icon_by_name, svg_to_png_bytes
+from fastapi.responses import Response
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    ensure_index()
+    yield
+
+
+app = FastAPI(title="GWS Slides Assistant", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.post("/api/plan")
+async def plan(request: dict):
+    """Planner mode: single-topic plan request. Returns JSON plan or natural-language response."""
+    topic = request.get("topic", "").strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="topic required")
+
+    try:
+        plan_obj, raw = generate_plan(topic)
+        return {
+            "plan": plan_obj,
+            "content": raw,
+            "hasPlan": plan_obj is not None,
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "plan": None,
+            "content": f"Error: {e}",
+            "hasPlan": False,
+        }
+
+
+@app.post("/api/execute-plan")
+async def execute_plan(request: dict):
+    """Execute a presentation plan: pass plan to agent to build the deck."""
+    plan = request.get("plan")
+    if not plan or not isinstance(plan, dict):
+        raise HTTPException(status_code=400, detail="plan object required")
+
+    title = plan.get("title", "Untitled Presentation")
+    slides = plan.get("slides", [])
+    aesthetics = plan.get("aesthetics", {})
+
+    def _norm(s):
+        """Normalize literal \\n to real newlines in plan content."""
+        if not isinstance(s, str):
+            return s
+        return s.replace("\\n", "\n").replace("\\r", "\r")
+
+    # Build a synthetic user message that instructs the agent to create the presentation from the plan
+    plan_text = f"Create a Google Slides presentation from this plan. Title: {title}\n\n"
+    plan_text += f"Theme/aesthetics: {aesthetics.get('theme', '')}. Primary color: {aesthetics.get('primary_color', '')}. Icon style: {aesthetics.get('suggested_icons_style', '')}.\n\n"
+    plan_text += "Slides to create:\n"
+    for s in slides:
+        plan_text += f"\n--- Slide {s.get('slide_number', '?')}: {s.get('title', '')} ---\n"
+        plan_text += f"Layout: {s.get('layout', '')}\n"
+        plan_text += f"Details: {_norm(s.get('details', s.get('content', '')))}\n"
+        plan_text += f"Content: {_norm(s.get('content', ''))}\n"
+        if s.get("elements"):
+            plan_text += f"Elements: {json.dumps(s['elements'])}\n"
+
+    messages = [{"role": "user", "content": plan_text}]
+    current_file = request.get("currentFile")
+
+    try:
+        result = run_agent(messages, current_file=current_file)
+        return {
+            "message": {"role": "assistant", "content": str(result["text"])},
+            "toolCalls": [
+                {"name": str(t["name"]), "args": _json_safe(t.get("args", {}))}
+                for t in result.get("tool_calls", [])
+            ],
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "message": {
+                "role": "assistant",
+                "content": f"Error: {e}. Ensure gws is installed and authenticated (gws auth login -s slides,drive)",
+            },
+            "toolCalls": [],
+        }
+
+
+@app.post("/api/chat")
+async def chat(request: dict):
+    messages = request.get("messages", [])
+    if not messages:
+        raise HTTPException(status_code=400, detail="messages array required")
+    current_file = request.get("currentFile")
+
+    try:
+        result = run_agent(messages, current_file=current_file)
+        return {
+            "message": {"role": "assistant", "content": str(result["text"])},
+            "toolCalls": [
+                {"name": str(t["name"]), "args": _json_safe(t.get("args", {}))}
+                for t in result.get("tool_calls", [])
+            ],
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "message": {
+                "role": "assistant",
+                "content": f"Error: {e}. Ensure gws is installed and authenticated (gws auth login -s slides,drive)",
+            },
+            "toolCalls": [],
+        }
+
+
+@app.get("/api/tools")
+async def list_tools():
+    return {
+        "tools": [
+            {"name": "presentations_create", "description": "Create a new presentation"},
+            {"name": "presentations_get", "description": "Get presentation content"},
+            {"name": "presentations_batch_update", "description": "Add slides, insert text"},
+            {"name": "pages_get_thumbnail", "description": "Get slide thumbnail"},
+            {"name": "drive_files_list", "description": "List Drive files"},
+            {"name": "add_icon_to_slide", "description": "Search and add Phosphor icon to a slide"},
+        ]
+    }
+
+
+@app.get("/api/health")
+async def health():
+    return {"status": "ok", "backend": "python-fastapi"}
+
+
+@app.get("/api/icon/png")
+async def get_icon_png(name: str):
+    """
+    Serve icon as PNG by name. Used by add_icon_to_slide when data URL exceeds 2KB.
+    Requires ICON_BASE_URL to be set to a publicly reachable URL (e.g. ngrok) for Google to fetch.
+    """
+    icon = get_icon_by_name(name)
+    if not icon or not icon.get("svg"):
+        raise HTTPException(status_code=404, detail=f"Icon '{name}' not found")
+    try:
+        png_bytes = svg_to_png_bytes(icon["svg"], output_width=128, output_height=128)
+        return Response(content=png_bytes, media_type="image/png")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/drive/files")
+async def list_drive_files(page_size: int = 30, q: str | None = None, refresh: bool = False):
+    """
+    List files in Google Drive. Fetches via gws CLI, stores in DB, returns files.
+    refresh=true forces a fresh fetch from Drive (same as normal - always fetches).
+    Sample response: {"files": [{"id":"...","name":"...","mimeType":"...","modifiedTime":"...","webViewLink":"...","iconLink":"..."}], "nextPageToken":"..."}
+    """
+    try:
+        result = drive_files_list(page_size=page_size, q=q)
+        files = result.get("files") or []
+        upsert_drive_files(files)
+        return {"files": files, "nextPageToken": result.get("nextPageToken")}
+    except Exception as e:
+        # Fallback to DB cache if gws fails
+        try:
+            cached = get_drive_files_from_db()
+            if cached:
+                return {"files": cached, "fromCache": True, "error": str(e)}
+        except Exception:
+            pass
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
