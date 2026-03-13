@@ -30,6 +30,27 @@ RESEARCH_TOOLS = [
             "required": ["upload_id", "query"],
         },
     ),
+    FunctionDeclaration(
+        name="web_search",
+        description=(
+            "Search the web for up-to-date information beyond the model's own knowledge. "
+            "Use when the user explicitly asks to search the web / internet, or when the "
+            "question clearly requires current external data (recent news, latest stats, "
+            "current product info). Do not use for questions that can be answered from "
+            "general knowledge or the user's documents alone."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Web search query string"},
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of search results to retrieve (default 5).",
+                },
+            },
+            "required": ["query"],
+        },
+    ),
 ]
 
 RESEARCH_SYSTEM = """You are a deep research assistant. You can answer general questions from your knowledge, or search the user's ingested documents (PDF/DOCX) when they attach files or explicitly ask to search.
@@ -37,12 +58,13 @@ RESEARCH_SYSTEM = """You are a deep research assistant. You can answer general q
 Tools (use only when appropriate):
 - list_documents: lists the user's ingested documents (upload_id, filename). Use ONLY when the user explicitly asks to list their files, see their documents, or pick a document to search. Do NOT call for general queries.
 - document_search(upload_id, query, k): semantic search over one document. Use ONLY when the context below provides attached documents with upload_ids. Do NOT call if no documents are attached.
+ - web_search(query, max_results): search the web for up-to-date external information when the user asks for web/internet search or the task clearly requires current data beyond these documents.
 
 Critical rules:
 1. When NO documents are attached (see context below): For general questions (e.g. "make an outline for a pitch", "best practices for X", "structure for 5 slides"), answer directly from your knowledge. Do NOT call list_documents or document_search. Do not mention or search the user's files.
 2. When NO documents are attached and the user explicitly asks to "list my files", "what documents do I have", or "search my documents for X": then call list_documents. Only call document_search if the user then asks to search a specific document (you will have upload_id from list_documents).
 3. When documents ARE attached: use only the upload_ids from the context below for document_search. Search across them as needed and synthesize. Do not use list_documents to load more; use only the attached list.
-4. You cannot access the web or Slides/Drive—only the user's ingested documents when attached or when they explicitly ask to use them."""
+4. For web/internet information, you MAY use web_search when the user asks for it explicitly or when up-to-date external data is clearly required. You still cannot access Slides/Drive tools—only the user's ingested documents and the web_search tool."""
 
 
 def _execute_research_tool(name: str, args: dict) -> str:
@@ -58,6 +80,14 @@ def _execute_research_tool(name: str, args: dict) -> str:
             k=args.get("k", 10),
         )
         return json.dumps({"chunks": chunks, "count": len(chunks)}, indent=2)
+    if name == "web_search":
+        from functions.web_search import web_search as _web_search
+
+        result = _web_search(
+            query=args.get("query", ""),
+            max_results=args.get("max_results", 5),
+        )
+        return json.dumps(result, indent=2)
     return json.dumps({"error": f"Unknown tool: {name}"})
 
 
@@ -106,7 +136,12 @@ def run_research_agent(query: str, documents: list[dict] | None = None) -> dict:
     system_instruction = RESEARCH_SYSTEM + doc_ctx
 
     genai.configure(api_key=api_key)
-    model_name = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    model_name = (
+        os.environ.get("RESEARCH_MODEL")
+        or os.environ.get("GEMINI_MODEL")
+        or os.environ.get("GOOGLE_GENERATIVE_AI_MODEL")
+        or "gemini-2.5-flash"
+    )
     model = genai.GenerativeModel(
         model_name=model_name,
         tools=[Tool(function_declarations=RESEARCH_TOOLS)],
@@ -117,7 +152,10 @@ def run_research_agent(query: str, documents: list[dict] | None = None) -> dict:
 
     chat = model.start_chat(history=[])
     tool_calls_made = []
-    max_rounds = int(os.environ.get("AGENT_MAX_ROUNDS", "15"))
+    max_rounds = int(
+        os.environ.get("RESEARCH_MAX_ROUNDS")
+        or os.environ.get("AGENT_MAX_ROUNDS", "15")
+    )
     round_num = 0
 
     try:

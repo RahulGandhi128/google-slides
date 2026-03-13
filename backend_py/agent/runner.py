@@ -332,8 +332,13 @@ def run_agent(
         system_instruction = system_instruction + file_ctx
 
     genai.configure(api_key=api_key)
-    # gemini-3.0-flash does not exist. Use gemini-2.5-flash (stable) or gemini-3-flash-preview
-    model_name = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    # Prefer per-agent model, then global fallbacks.
+    model_name = (
+        os.environ.get("AGENT_MODEL")
+        or os.environ.get("GEMINI_MODEL")
+        or os.environ.get("GOOGLE_GENERATIVE_AI_MODEL")
+        or "gemini-2.5-flash"
+    )
     model = genai.GenerativeModel(
         model_name=model_name,
         tools=[Tool(function_declarations=TOOL_DECLARATIONS)],

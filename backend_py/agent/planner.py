@@ -22,7 +22,12 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", os.getenv("GOOGLE_GENERATIVE_AI_MODEL", "gemini-2.5-flash"))
+PLANNER_MODEL: str = (
+    os.getenv("PLANNER_MODEL")
+    or os.getenv("GEMINI_MODEL")
+    or os.getenv("GOOGLE_GENERATIVE_AI_MODEL")
+    or "gemini-2.5-flash"
+)
 
 PLAN_PROMPT_TEMPLATE = """You are a presentation planning expert. Plan only when the user explicitly asks for a presentation plan, slide outline, or deck (e.g. "create a plan", "make a deck", "outline slides"). If the user is just asking a question (e.g. what is this about, summarize, explain), answer in natural language and do NOT output any JSON.
 
@@ -95,7 +100,7 @@ def generate_plan(topic: str, document_context: str | None = None) -> tuple[dict
 
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(
-        model_name=GEMINI_MODEL,
+        model_name=PLANNER_MODEL,
         system_instruction=PLAN_PROMPT_TEMPLATE,
         generation_config={"temperature": 0.3},
     )
