@@ -32,3 +32,20 @@ CREATE TABLE IF NOT EXISTS drive_files (
 );
 
 CREATE INDEX IF NOT EXISTS idx_drive_files_modified ON drive_files(modified_time);
+
+-- Ingested documents: small docs store full_text, big docs use FAISS (document_indexes)
+CREATE TABLE IF NOT EXISTS documents (
+    upload_id TEXT PRIMARY KEY,
+    filename TEXT NOT NULL,
+    page_count INTEGER NOT NULL DEFAULT 0,
+    full_text TEXT,
+    has_faiss INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS document_indexes (
+    upload_id TEXT PRIMARY KEY,
+    index_blob BLOB NOT NULL,
+    docstore_blob BLOB NOT NULL,
+    FOREIGN KEY (upload_id) REFERENCES documents(upload_id)
+);

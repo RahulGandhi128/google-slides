@@ -92,23 +92,32 @@ function PlanDisplay({ plan, onProceed, isExecuting }) {
   );
 }
 
-function MessageBubble({ message, isUser, onProceedPlan, isExecutingPlan }) {
+function MessageBubble({ message, isUser, onProceedPlan, isExecutingPlan, onDesignOutline, designingOutlineIndex, messageIndex }) {
   const toolCalls = message.toolCalls || [];
   const hasTools = !isUser && toolCalls.length > 0;
   const hasPlan = message.plan && message.hasPlan;
+  const mode = message.mode || 'agent';
+  const modeLabel = mode === 'design' ? 'Design' : mode === 'research' ? 'Research' : 'Agent';
+  const isResearchWithContent = !isUser && mode === 'research' && !hasPlan && (message.content || '').trim();
+  const isDesigningThis = designingOutlineIndex === messageIndex;
 
   return (
     <div
-      className={`message ${isUser ? 'message-user' : 'message-assistant'}`}
+      className={`message ${isUser ? 'message-user' : 'message-assistant'} message-mode-${mode}`}
     >
       <div className="message-avatar">
         {isUser ? (
           <span className="avatar-icon">U</span>
         ) : (
-          <span className="avatar-icon assistant">G</span>
+          <span className="avatar-icon assistant">{mode === 'design' ? 'D' : mode === 'research' ? 'R' : 'A'}</span>
         )}
       </div>
       <div className="message-content">
+        {!isUser && (
+          <div className={`message-mode-label message-mode-label-${mode}`}>
+            {modeLabel}
+          </div>
+        )}
         {hasPlan ? (
           <PlanDisplay
             plan={message.plan}
@@ -137,6 +146,18 @@ function MessageBubble({ message, isUser, onProceedPlan, isExecutingPlan }) {
             </div>
           </details>
         )}
+        {isResearchWithContent && onDesignOutline && (
+          <div className="message-research-action">
+            <button
+              type="button"
+              className="design-outline-btn"
+              onClick={() => onDesignOutline(message.content, messageIndex)}
+              disabled={isDesigningThis}
+            >
+              {isDesigningThis ? 'Designing…' : 'Design this outline'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -148,15 +169,24 @@ function ChatPage() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isExecutingPlan, setIsExecutingPlan] = useState(false);
+  const [designingOutlineIndex, setDesigningOutlineIndex] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
   const [driveFiles, setDriveFiles] = useState([]);
   const [driveFilesLoading, setDriveFilesLoading] = useState(false);
-  const [planMode, setPlanMode] = useState(false);
+  const [chatMode, setChatMode] = useState('research'); // 'research' | 'design' | 'agent' (default research for new chat)
   const [sessionId, setSessionId] = useState(null);
   const [chatSessions, setChatSessions] = useState([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [attachedDocuments, setAttachedDocuments] = useState([]);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [savedDocuments, setSavedDocuments] = useState([]);
+  const [mentionLoading, setMentionLoading] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const mentionPopupRef = useRef(null);
 
   useEffect(() => {
     const fileId = searchParams.get('fileId');
@@ -204,6 +234,7 @@ function ChatPage() {
             content: m.content,
             plan: m.plan,
             hasPlan: m.hasPlan,
+            mode: m.mode || 'agent',
           }))
         );
       }
@@ -217,6 +248,89 @@ function ChatPage() {
     setMessages([]);
     fetchChatSessions();
   };
+
+  const fetchSavedDocuments = async () => {
+    setMentionLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/documents`);
+      const data = await res.json();
+      if (res.ok && data.documents) setSavedDocuments(data.documents);
+    } catch (err) {
+      console.error('Failed to fetch documents:', err);
+    } finally {
+      setMentionLoading(false);
+    }
+  };
+
+  const filteredMentionDocs = savedDocuments.filter(
+    (d) => !mentionQuery.trim() || d.filename.toLowerCase().includes(mentionQuery.toLowerCase())
+  );
+
+  const handleInputChange = (e) => {
+    const v = e.target.value;
+    setInput(v);
+    const selStart = e.target.selectionStart;
+    const beforeCaret = v.slice(0, selStart);
+    const atMatch = beforeCaret.match(/@([^\s]*)$/);
+    if (atMatch) {
+      setMentionOpen(true);
+      setMentionQuery(atMatch[1] || '');
+      if (savedDocuments.length === 0) fetchSavedDocuments();
+    } else {
+      setMentionOpen(false);
+    }
+  };
+
+  const selectMentionDoc = (doc) => {
+    const beforeAt = input.slice(0, inputRef.current?.selectionStart ?? input.length).replace(/@[^\s]*$/, '');
+    const afterAt = input.slice(inputRef.current?.selectionStart ?? input.length);
+    setInput(`${beforeAt}@${doc.filename} ${afterAt}`.trim());
+    setAttachedDocuments((prev) => {
+      if (prev.some((d) => d.upload_id === doc.upload_id)) return prev;
+      return [...prev, { upload_id: doc.upload_id, filename: doc.filename }];
+    });
+    setMentionOpen(false);
+    setMentionQuery('');
+    setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const ext = (file.name || '').toLowerCase().slice(-5);
+    if (!ext.endsWith('.pdf') && !ext.endsWith('.docx')) {
+      alert('Only PDF and DOCX files are supported.');
+      return;
+    }
+    setUploadingDoc(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch(`${API_BASE}/documents/ingest`, { method: 'POST', body: form });
+      const data = await res.json();
+      if (res.ok && data.upload_id) {
+        setAttachedDocuments((prev) => [...prev, { upload_id: data.upload_id, filename: data.filename }]);
+      } else {
+        alert(data.detail || 'Upload failed');
+      }
+    } catch (err) {
+      alert(err.message || 'Upload failed');
+    } finally {
+      setUploadingDoc(false);
+      e.target.value = '';
+    }
+  };
+
+  useEffect(() => {
+    if (!mentionOpen) return;
+    const onDocClick = (e) => {
+      if (mentionPopupRef.current && !mentionPopupRef.current.contains(e.target) && inputRef.current && !inputRef.current.contains(e.target)) {
+        setMentionOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [mentionOpen]);
 
   const updateUrlForFile = (file) => {
     if (!file) {
@@ -266,6 +380,51 @@ function ChatPage() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  const handleDesignOutline = async (outlineContent, messageIndex) => {
+    if (!outlineContent || designingOutlineIndex != null) return;
+    setDesigningOutlineIndex(messageIndex);
+    const documentId = attachedDocuments[0]?.upload_id ?? null;
+    try {
+      const res = await fetch(`${API_BASE}/plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: outlineContent,
+          sessionId,
+          documentId,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.sessionId) setSessionId(data.sessionId);
+      fetchChatSessions();
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: data.content || 'Design plan generated.',
+          plan: data.plan,
+          hasPlan: data.hasPlan,
+          toolCalls: [],
+          mode: 'design',
+        },
+      ]);
+      scrollToBottom();
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: `Error generating design: ${err.message}.`,
+          toolCalls: [],
+          mode: 'design',
+        },
+      ]);
+      scrollToBottom();
+    } finally {
+      setDesigningOutlineIndex(null);
+    }
+  };
 
   const executePlan = async (plan) => {
     if (!plan || isExecutingPlan) return;
@@ -327,17 +486,21 @@ function ChatPage() {
     const text = input.trim();
     if (!text || isLoading) return;
 
-    const userMessage = { role: 'user', content: text };
+    const documents = attachedDocuments.map((d) => ({ upload_id: d.upload_id, filename: d.filename || '' }));
+    const documentId = documents[0]?.upload_id ?? null;
+    const documentFilename = documents[0]?.filename ?? null;
+    const userMessage = { role: 'user', content: text, mode: chatMode };
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
+    if (chatMode !== 'research') setAttachedDocuments([]);
     setIsLoading(true);
 
     try {
-      if (planMode) {
+      if (chatMode === 'design') {
         const res = await fetch(`${API_BASE}/plan`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ topic: text, sessionId }),
+          body: JSON.stringify({ topic: text, sessionId, documentId }),
         });
         const data = await res.json();
         if (data.sessionId) setSessionId(data.sessionId);
@@ -350,6 +513,30 @@ function ChatPage() {
             plan: data.plan,
             hasPlan: data.hasPlan,
             toolCalls: [],
+            mode: 'design',
+          },
+        ]);
+      } else if (chatMode === 'research') {
+        const res = await fetch(`${API_BASE}/research`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: text,
+            documents,
+            sessionId,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || data.error || 'Research request failed');
+        if (data.sessionId) setSessionId(data.sessionId);
+        fetchChatSessions();
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: data.message?.content || 'No response.',
+            toolCalls: data.toolCalls || [],
+            mode: 'research',
           },
         ]);
       } else {
@@ -364,6 +551,8 @@ function ChatPage() {
           body: JSON.stringify({
             messages: chatMessages,
             sessionId,
+            documentId,
+            documentFilename,
             currentFile: selectedFile ? { id: selectedFile.id, name: selectedFile.name, mimeType: selectedFile.mimeType } : null,
           }),
         });
@@ -383,6 +572,7 @@ function ChatPage() {
             role: 'assistant',
             content: data.message?.content || 'No response.',
             toolCalls: data.toolCalls || [],
+            mode: 'agent',
           },
         ]);
       }
@@ -413,6 +603,10 @@ function ChatPage() {
   }, [input]);
 
   const handleKeyDown = (e) => {
+    if (e.key === 'Escape') {
+      setMentionOpen(false);
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
@@ -441,18 +635,22 @@ function ChatPage() {
                 <p className="chat-sidebar-empty">Loading…</p>
               ) : chatSessions.length > 0 ? (
                 <ul className="chat-history-list">
-                  {chatSessions.map((s) => (
-                    <li key={s.id}>
-                      <button
-                        type="button"
-                        className={`chat-sidebar-file-item ${sessionId === s.id ? 'selected' : ''}`}
-                        onClick={() => loadSession(s.id)}
-                        title={s.title}
-                      >
-                        {s.title || 'New chat'}
-                      </button>
-                    </li>
-                  ))}
+                  {chatSessions.map((s) => {
+                    const fullTitle = s.title || 'New chat';
+                    const shortTitle = fullTitle.length > 28 ? `${fullTitle.slice(0, 27)}…` : fullTitle;
+                    return (
+                      <li key={s.id}>
+                        <button
+                          type="button"
+                          className={`chat-sidebar-file-item ${sessionId === s.id ? 'selected' : ''}`}
+                          onClick={() => loadSession(s.id)}
+                          title={fullTitle}
+                        >
+                          {shortTitle}
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
               ) : (
                 <p className="chat-sidebar-empty">No chats yet</p>
@@ -540,14 +738,40 @@ function ChatPage() {
             )}
         </aside>
         <main className="chat-container">
+          <div className="mode-tabs-bar">
+            <button
+              type="button"
+              className={`mode-tab mode-tab-research ${chatMode === 'research' ? 'active' : ''}`}
+              onClick={() => setChatMode('research')}
+            >
+              <span className="mode-tab-icon mode-tab-icon-research">R</span>
+              <span className="mode-tab-label">Research</span>
+            </button>
+            <button
+              type="button"
+              className={`mode-tab mode-tab-design ${chatMode === 'design' ? 'active' : ''}`}
+              onClick={() => setChatMode('design')}
+            >
+              <span className="mode-tab-icon mode-tab-icon-design">D</span>
+              <span className="mode-tab-label">Design</span>
+            </button>
+            <button
+              type="button"
+              className={`mode-tab mode-tab-agent ${chatMode === 'agent' ? 'active' : ''}`}
+              onClick={() => setChatMode('agent')}
+            >
+              <span className="mode-tab-icon mode-tab-icon-agent">A</span>
+              <span className="mode-tab-label">Agent</span>
+            </button>
+          </div>
           <div className="chat-scroll">
           {messages.length === 0 ? (
             <div className="welcome">
               <div className="welcome-card">
-                <h2>{planMode ? 'Create a presentation plan' : selectedFile ? `Working on "${selectedFile.name}"` : 'What can I help you with?'}</h2>
-                <p>Try asking:</p>
+                <h2>{chatMode === 'design' ? 'Design your presentation' : chatMode === 'research' ? 'Deep research on your documents' : selectedFile ? `Working on "${selectedFile.name}"` : 'What can I help you with?'}</h2>
+                <p>{chatMode === 'research' ? 'Attach one or more documents (upload or @) to search across them, or ask without attaching.' : 'Try asking:'}</p>
                 <ul className="suggestions">
-                  {planMode ? (
+                  {chatMode === 'design' ? (
                     <>
                       <li onClick={() => setInput('Create a plan for a 5-slide product launch presentation')}>
                         Create a plan for a 5-slide product launch presentation
@@ -557,6 +781,18 @@ function ChatPage() {
                       </li>
                       <li onClick={() => setInput('Make a deck about AI in healthcare')}>
                         Make a deck about AI in healthcare
+                      </li>
+                    </>
+                  ) : chatMode === 'research' ? (
+                    <>
+                      <li onClick={() => setInput('Summarize the main arguments and evidence')}>
+                        Summarize the main arguments and evidence
+                      </li>
+                      <li onClick={() => setInput('What are the key findings and conclusions?')}>
+                        What are the key findings and conclusions?
+                      </li>
+                      <li onClick={() => setInput('Compare and contrast the main themes')}>
+                        Compare and contrast the main themes
                       </li>
                     </>
                   ) : selectedFile ? (
@@ -599,9 +835,12 @@ function ChatPage() {
                 <MessageBubble
                   key={i}
                   message={msg}
+                  messageIndex={i}
                   isUser={msg.role === 'user'}
                   onProceedPlan={executePlan}
                   isExecutingPlan={isExecutingPlan}
+                  onDesignOutline={handleDesignOutline}
+                  designingOutlineIndex={designingOutlineIndex}
                 />
               ))}
               {isLoading && (
@@ -623,36 +862,84 @@ function ChatPage() {
           )}
           </div>
           <div className="input-area-inline">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,.docx"
+          className="input-file-hidden"
+          onChange={handleFileUpload}
+          aria-hidden="true"
+        />
+        {mentionOpen && (
+          <div ref={mentionPopupRef} className="mention-popup">
+            <input
+              type="text"
+              className="mention-search"
+              placeholder="Search saved files…"
+              value={mentionQuery}
+              onChange={(e) => setMentionQuery(e.target.value)}
+              autoFocus
+            />
+            <div className="mention-list">
+              {mentionLoading ? (
+                <div className="mention-item mention-item-muted">Loading…</div>
+              ) : filteredMentionDocs.length === 0 ? (
+                <div className="mention-item mention-item-muted">No documents found</div>
+              ) : (
+                filteredMentionDocs.map((doc) => (
+                  <button
+                    key={doc.upload_id}
+                    type="button"
+                    className="mention-item"
+                    onClick={() => selectMentionDoc(doc)}
+                  >
+                    <span className="mention-item-name">{doc.filename}</span>
+                    {doc.has_faiss && <span className="mention-item-badge">indexed</span>}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        )}
         <div className="input-inbox">
+          {(attachedDocuments.length > 0 || uploadingDoc) && (
+            <div className="input-attached-wrap">
+              {uploadingDoc && (
+                <span className="input-attached-label">Uploading…</span>
+              )}
+              {attachedDocuments.map((doc, idx) => (
+                <div key={doc.upload_id} className="input-attached">
+                  <span className="input-attached-label" title={doc.filename}>{doc.filename}</span>
+                  <button type="button" className="input-attached-remove" onClick={() => setAttachedDocuments((prev) => prev.filter((_, i) => i !== idx))} aria-label="Remove">×</button>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="input-inner">
             <textarea
               ref={inputRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={handleInputChange}
               onKeyDown={handleKeyDown}
-              placeholder={planMode ? 'Describe your presentation topic...' : (selectedFile ? `Ask about "${selectedFile.name}" or anything else...` : 'Ask anything about Google Slides, Drive...')}
+              placeholder={chatMode === 'design' ? 'Describe your presentation topic... Type @ for saved files' : chatMode === 'research' ? 'Ask a research question... Attach 0+ docs with @ or upload' : (selectedFile ? `Ask about "${selectedFile.name}" or type @ for saved files...` : 'Ask anything... Type @ for saved files')}
               rows={1}
               disabled={isLoading}
               className="chat-textarea"
             />
           </div>
           <div className="input-footer">
-            <div className="input-mode-buttons">
+            <div className="input-footer-left">
               <button
                 type="button"
-                className={`mode-btn ${!planMode ? 'active' : ''}`}
-                onClick={() => setPlanMode(false)}
-                title="Chat mode"
+                className="input-icon-btn"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingDoc || isLoading}
+                title="Upload PDF or DOCX"
+                aria-label="Upload document"
               >
-                Chat
-              </button>
-              <button
-                type="button"
-                className={`mode-btn ${planMode ? 'active' : ''}`}
-                onClick={() => setPlanMode(true)}
-                title="Plan mode - create presentation outline"
-              >
-                Plan
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+                </svg>
               </button>
             </div>
             <button

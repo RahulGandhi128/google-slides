@@ -148,7 +148,7 @@ ICONS - When users ask for icons, decorative icons, or visual symbols on slides:
 - Use add_icon_to_slide with presentationId, pageObjectId, and a descriptive query (e.g. "rocket", "lightbulb", "checkmark").
 - The tool handles search + createImage internally. Do not call search_icon separately.
 
-You may make up to 20 tool-call rounds (configurable via AGENT_MAX_ROUNDS). Use the full context from each tool result. Do not stop until the user's request is fully satisfied, then respond with a clear summary."""
+You may make up to 40 tool-call rounds (configurable via AGENT_MAX_ROUNDS). Use the full context from each tool result. Do not stop until the user's request is fully satisfied, then respond with a clear summary."""
 
 
 def _preview(s: str, max_len: int = 300) -> str:
@@ -312,7 +312,11 @@ def _execute_tool(name: str, args: dict) -> str:
         return f"Error: {e}"
 
 
-def run_agent(messages: list[dict], current_file: dict | None = None) -> dict:
+def run_agent(
+    messages: list[dict],
+    current_file: dict | None = None,
+    current_document: dict | None = None,
+) -> dict:
     api_key = os.environ.get("GOOGLE_GENERATIVE_AI_API_KEY")
     if not api_key:
         return {"text": "No LLM configured. Set GOOGLE_GENERATIVE_AI_API_KEY in .env", "tool_calls": []}
@@ -325,7 +329,7 @@ def run_agent(messages: list[dict], current_file: dict | None = None) -> dict:
             "presentations_batch_update, pages_get_thumbnail), use this presentationId unless the user "
             "explicitly requests a different file. Do not search Drive for this file—use the id above."
         )
-        system_instruction = SYSTEM_INSTRUCTION + file_ctx
+        system_instruction = system_instruction + file_ctx
 
     genai.configure(api_key=api_key)
     # gemini-3.0-flash does not exist. Use gemini-2.5-flash (stable) or gemini-3-flash-preview
@@ -357,7 +361,7 @@ def run_agent(messages: list[dict], current_file: dict | None = None) -> dict:
 
     chat = model.start_chat(history=history)
     tool_calls_made = []
-    max_rounds = int(os.environ.get("AGENT_MAX_ROUNDS", "20"))
+    max_rounds = int(os.environ.get("AGENT_MAX_ROUNDS", "40"))
     round_num = 0
 
     try:

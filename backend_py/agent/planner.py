@@ -72,15 +72,20 @@ Requirements:
 - When producing a plan, output only the JSON object, no other text before or after."""
 
 
-def generate_plan(topic: str) -> tuple[dict[str, Any] | None, str]:
+def generate_plan(topic: str, document_context: str | None = None) -> tuple[dict[str, Any] | None, str]:
     """
     Run the planner LLM. Returns (plan, text). Plan is non-None only when the user
     explicitly asked for a plan and the model output valid plan JSON; otherwise
     returns (None, raw response text) for RAG-style answers.
+    If document_context is provided (from an ingested document), it is prepended so the plan is based on that content.
     """
-    prompt = f"User request:\n\n{topic.strip()}"
-    if not prompt.strip():
+    topic = topic.strip()
+    if not topic:
         raise ValueError("Topic must not be empty.")
+    if document_context and document_context.strip():
+        prompt = f"Document content (use this to create the presentation plan):\n\n{document_context.strip()}\n\nUser request:\n\n{topic}"
+    else:
+        prompt = f"User request:\n\n{topic}"
 
     logger.info("Planner: generating for topic=%r", topic[:80])
 

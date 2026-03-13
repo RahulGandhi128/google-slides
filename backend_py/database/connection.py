@@ -81,3 +81,24 @@ def init_db():
             conn.commit()
         except Exception:
             pass
+
+    # Documents and FAISS indexes (for RAG)
+    with engine.connect() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS documents (
+                upload_id TEXT PRIMARY KEY,
+                filename TEXT NOT NULL,
+                page_count INTEGER NOT NULL DEFAULT 0,
+                full_text TEXT,
+                has_faiss INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS document_indexes (
+                upload_id TEXT PRIMARY KEY,
+                index_blob BLOB NOT NULL,
+                docstore_blob BLOB NOT NULL
+            )
+        """))
+        conn.commit()
