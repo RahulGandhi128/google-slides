@@ -28,10 +28,11 @@ import tempfile
 from agent import run_agent
 from agent.planner import generate_plan
 from agent.research import run_research_agent
-from gws import drive_files_list
+from gws import drive_files_list, presentations_get
 from database import init_db
 from database.drive_files import upsert_drive_files, get_drive_files_from_db
 from database.documents import ingest_document, list_documents as list_docs_db
+from database.slide_templates import list_templates as list_slide_templates, upsert_template as upsert_slide_template
 from database.chat_sessions import (
     create_session,
     create_session_if_needed,
@@ -70,13 +71,21 @@ async def plan(request: dict):
         raise HTTPException(status_code=400, detail="topic required")
 
     session_id = create_session_if_needed(request.get("sessionId"))
-    add_message(session_id, "user", topic)
+    add_message(session_id, "user", topic, mode="design")
     update_session_title(session_id, topic[:100] if len(topic) > 100 else topic)
 
+    document_context = request.get("documentContext")
+    design_settings = request.get("designSettings") or {}
+    color_palette = request.get("colorPalette")  # optional: { "dominant": "#hex", "palette": ["#hex", ...] }
     try:
-        plan_obj, raw = generate_plan(topic, document_context=None)
+        plan_obj, raw = generate_plan(
+            topic,
+            document_context=document_context,
+            design_settings=design_settings,
+            color_palette=color_palette,
+        )
         plan_json = json.dumps(plan_obj) if plan_obj else None
-        add_message(session_id, "assistant", raw, plan_json=plan_json)
+        add_message(session_id, "assistant", raw, plan_json=plan_json, mode="design")
         return {
             "sessionId": session_id,
             "plan": plan_obj,
@@ -84,7 +93,7 @@ async def plan(request: dict):
             "hasPlan": plan_obj is not None,
         }
     except Exception as e:
-        add_message(session_id, "assistant", f"Error: {e}")
+        add_message(session_id, "assistant", f"Error: {e}", mode="design")
         return {
             "sessionId": session_id,
             "error": str(e),
@@ -112,14 +121,60 @@ async def research(request: dict):
                 "filename": request.get("documentFilename") or request.get("filename") or "",
             }]
 
+    # Optional slide template (presentation type with slide outline/guidance)
+    slide_template = request.get("slideTemplate")
+
     session_id = create_session_if_needed(request.get("sessionId"))
-    add_message(session_id, "user", query)
+    add_message(session_id, "user", query, mode="research")
     update_session_title(session_id, (query[:100]) or "Research")
 
+    ground_response = request.get("groundResponse", False)
+
+    # If a slide template is provided, prepend it as context for the research agent
+    template_context = ""
+    if isinstance(slide_template, dict):
+        name = (slide_template.get("name") or "").strip() or "Presentation"
+        slides = slide_template.get("slides") or []
+        lines = [f"Presentation template: {name}", ""]
+        for idx, s in enumerate(slides):
+            if not isinstance(s, dict):
+                continue
+            title = (s.get("title") or "").strip() or f"Slide {idx + 1}"
+            guidance = (s.get("guidance") or "").strip()
+            if guidance:
+                lines.append(f"{idx + 1}. {title} — {guidance}")
+            else:
+                lines.append(f"{idx + 1}. {title}")
+        template_context = "\n".join(lines).strip()
+
+    # Build lightweight chat history (last 5 messages before this one) for additional context
+    history_block = ""
     try:
-        result = run_research_agent(query=query, documents=documents)
+        session = get_session_with_messages(session_id)
+        msgs = session.get("messages", []) if session else []
+        # Exclude the just-added user message; take last 5 before it
+        if msgs:
+            prior = msgs[:-1][-5:]
+            if prior:
+                lines = ["Conversation history (most recent last):"]
+                for m in prior:
+                    role = (m.get("role") or "").capitalize()
+                    content = m.get("content") or ""
+                    lines.append(f"{role}: {content}")
+                history_block = "\n".join(lines).strip()
+    except Exception:
+        history_block = ""
+
+    effective_query = query
+    if template_context:
+        effective_query = f"{template_context}\n\nUser request:\n{effective_query}"
+    if history_block:
+        effective_query = f"{history_block}\n\n{effective_query}"
+
+    try:
+        result = run_research_agent(query=effective_query, documents=documents, ground_response=ground_response)
         content = str(result["text"])
-        add_message(session_id, "assistant", content)
+        add_message(session_id, "assistant", content, mode="research")
         return {
             "sessionId": session_id,
             "message": {"role": "assistant", "content": content},
@@ -129,7 +184,7 @@ async def research(request: dict):
             ],
         }
     except Exception as e:
-        add_message(session_id, "assistant", f"Error: {e}")
+        add_message(session_id, "assistant", f"Error: {e}", mode="research")
         return {
             "sessionId": session_id,
             "error": str(e),
@@ -138,17 +193,142 @@ async def research(request: dict):
         }
 
 
+@app.post("/api/research-modify")
+async def research_modify(request: dict):
+    """Find replacement content per slide from extracted presentation + optional instructions and docs. Returns replacementSlides in a new output card."""
+    extracted_slides = request.get("extractedSlides") or request.get("extracted_slides")
+    if not extracted_slides or not isinstance(extracted_slides, list):
+        raise HTTPException(status_code=400, detail="extractedSlides (array) required")
+
+    instructions = (request.get("instructions") or request.get("query") or "").strip()
+    documents = request.get("documents")
+    if documents is None or not isinstance(documents, list):
+        documents = []
+        doc_id = request.get("documentId") or request.get("upload_id")
+        if doc_id:
+            documents = [
+                {
+                    "upload_id": doc_id,
+                    "filename": request.get("documentFilename") or request.get("filename") or "",
+                }
+            ]
+
+    session_id = create_session_if_needed(request.get("sessionId"))
+    user_label = "Find replacements" + (f": {instructions[:80]}…" if len(instructions) > 80 else f": {instructions}" if instructions else "")
+    add_message(session_id, "user", user_label, mode="research")
+
+    query = instructions or "Find replacement content for each slide from the documents. Output only the JSON with a 'slides' array."
+    try:
+        result = run_research_agent(
+            query=query,
+            documents=documents,
+            mode="modify",
+            extracted_slides=extracted_slides,
+        )
+        content = str(result.get("text") or "")
+        replacement_slides = result.get("replacement_slides")
+        add_message(session_id, "assistant", content, mode="research")
+        out = {
+            "sessionId": session_id,
+            "message": {"role": "assistant", "content": content, "mode": "research"},
+            "toolCalls": [
+                {"name": str(t["name"]), "args": _json_safe(t.get("args", {}))}
+                for t in result.get("tool_calls", [])
+            ],
+        }
+        if replacement_slides is not None:
+            out["message"]["replacementSlides"] = replacement_slides
+        return out
+    except Exception as e:
+        add_message(session_id, "assistant", f"Error: {e}", mode="research")
+        return {
+            "sessionId": session_id,
+            "error": str(e),
+            "message": {"role": "assistant", "content": f"Error: {e}", "mode": "research"},
+            "toolCalls": [],
+        }
+
+
+def _extract_slide_text(slide: dict) -> tuple[str, str]:
+    """Extract title and body text from a slide's pageElements. Returns (title, body)."""
+    title_parts = []
+    body_parts = []
+    elements = slide.get("pageElements") or []
+    for el in elements:
+        shape = el.get("shape") or {}
+        text_obj = shape.get("text") or {}
+        text_elements = text_obj.get("textElements") or []
+        chunk = []
+        for te in text_elements:
+            run = te.get("textRun") or {}
+            content = (run.get("content") or "").strip()
+            if content:
+                chunk.append(content)
+        if not chunk:
+            continue
+        text = " ".join(chunk).strip()
+        if not text:
+            continue
+        # First text box treated as title if we don't have one yet; else body
+        if not title_parts and (shape.get("shapeType") == "TEXT_BOX" or True):
+            first_line = text.split("\n")[0].strip() if "\n" in text else text
+            if first_line and len(first_line) < 200:
+                title_parts.append(first_line)
+                rest = text[len(first_line) :].strip().strip("\n")
+                if rest:
+                    body_parts.append(rest)
+            else:
+                body_parts.append(text)
+        else:
+            body_parts.append(text)
+    title = " ".join(title_parts).strip() or "Untitled"
+    body = "\n".join(body_parts).strip()
+    return title, body
+
+
+@app.post("/api/extract-presentation")
+async def extract_presentation(request: dict):
+    """Extract text from each slide of a presentation. Returns slides with title and body per slide."""
+    presentation_id = (request.get("presentationId") or request.get("presentation_id") or "").strip()
+    if not presentation_id:
+        raise HTTPException(status_code=400, detail="presentationId required")
+    try:
+        pres = presentations_get(presentation_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to get presentation: {e}")
+    if not isinstance(pres, dict):
+        raise HTTPException(status_code=502, detail="Invalid presentation response")
+    slides_raw = pres.get("slides") or []
+    out_slides = []
+    for i, slide in enumerate(slides_raw):
+        if not isinstance(slide, dict):
+            continue
+        title, body = _extract_slide_text(slide)
+        out_slides.append({
+            "slideIndex": i + 1,
+            "title": title,
+            "body": body,
+        })
+    return {"slides": out_slides, "presentationId": presentation_id}
+
+
 @app.post("/api/execute-plan")
 async def execute_plan(request: dict):
-    """Execute a presentation plan: pass plan to agent to build the deck."""
+    """Execute a presentation plan: pass plan to agent to build the deck (new or modify existing)."""
     plan = request.get("plan")
     if not plan or not isinstance(plan, dict):
         raise HTTPException(status_code=400, detail="plan object required")
+
+    modify_existing = request.get("modifyExisting") is True
+    current_file = request.get("currentFile")
+    if modify_existing and (not current_file or not current_file.get("id")):
+        raise HTTPException(status_code=400, detail="Modify mode requires currentFile with presentation id")
 
     session_id = create_session_if_needed(request.get("sessionId"))
     title = plan.get("title", "Untitled Presentation")
     slides = plan.get("slides", [])
     aesthetics = plan.get("aesthetics", {})
+    design_settings = request.get("designSettings") or {}
 
     def _norm(s):
         """Normalize literal \\n to real newlines in plan content."""
@@ -156,9 +336,56 @@ async def execute_plan(request: dict):
             return s
         return s.replace("\\n", "\n").replace("\\r", "\r")
 
-    plan_text = f"Create a Google Slides presentation from this plan. Title: {title}\n\n"
-    plan_text += f"Theme/aesthetics: {aesthetics.get('theme', '')}. Primary color: {aesthetics.get('primary_color', '')}. Icon style: {aesthetics.get('suggested_icons_style', '')}.\n\n"
-    plan_text += "Slides to create:\n"
+    def _design_instruction(settings: dict) -> str:
+        parts = []
+        style = settings.get("style", "minimalist_bw")
+        if style == "minimalist_bw":
+            parts.append("Design style: Minimalist. White background, black text, clean layout.")
+        elif style == "brand_colors":
+            parts.append("Design style: Use brand accent color for headers and accents; keep layout professional.")
+        elif style == "dark":
+            parts.append("Design style: Dark theme. Dark background, light text.")
+        if settings.get("printable"):
+            parts.append("Printable: Use only white backgrounds with black text. No gradients. Ensure all content is legible in grayscale print.")
+        max_lines = settings.get("maxLinesPerSlide")
+        if max_lines is not None:
+            parts.append(f"Limit body text to at most {max_lines} lines per slide.")
+        if not parts:
+            return ""
+        return "\n\nDesign constraints: " + " ".join(parts)
+
+    design_instruction = _design_instruction(design_settings)
+    theme_colors = aesthetics.get("theme_colors") or {}
+
+    if modify_existing:
+        plan_text = (
+            "Update the EXISTING Google Slides presentation. Do NOT call scaffold_presentation or presentations_create.\n"
+            f"The presentation to update has presentationId: {current_file.get('id')} and name: {current_file.get('name', '')}.\n"
+            "Use presentations_get to load the current slides and structure, then use presentations_batch_update to update or replace content on each slide according to the plan below.\n\n"
+        )
+        plan_text += f"Theme/aesthetics: {aesthetics.get('theme', '')}. Primary color: {aesthetics.get('primary_color', '')}. Icon style: {aesthetics.get('suggested_icons_style', '')}.\n\n"
+        if theme_colors:
+            plan_text += "Theme colors (use these for styling):\n"
+            for k, v in theme_colors.items():
+                if v:
+                    plan_text += f"  {k}: {v}\n"
+            plan_text += "\n"
+        if design_instruction:
+            plan_text += design_instruction.strip() + "\n\n"
+        plan_text += "Slides to update (match by slide number / order):\n"
+    else:
+        plan_text = f"Create a Google Slides presentation from this plan. Title: {title}\n\n"
+        plan_text += f"Theme/aesthetics: {aesthetics.get('theme', '')}. Primary color: {aesthetics.get('primary_color', '')}. Icon style: {aesthetics.get('suggested_icons_style', '')}.\n\n"
+        if theme_colors:
+            plan_text += "Theme colors (use these for styling):\n"
+            for k, v in theme_colors.items():
+                if v:
+                    plan_text += f"  {k}: {v}\n"
+            plan_text += "\n"
+        if design_instruction:
+            plan_text += design_instruction.strip() + "\n\n"
+        plan_text += "Slides to create:\n"
+
     for s in slides:
         plan_text += f"\n--- Slide {s.get('slide_number', '?')}: {s.get('title', '')} ---\n"
         plan_text += f"Layout: {s.get('layout', '')}\n"
@@ -167,14 +394,13 @@ async def execute_plan(request: dict):
         if s.get("elements"):
             plan_text += f"Elements: {json.dumps(s['elements'])}\n"
 
-    add_message(session_id, "user", f"Build presentation: {title}")
+    add_message(session_id, "user", f"Build presentation: {title}" if not modify_existing else f"Update presentation: {title}", mode="agent")
     messages = [{"role": "user", "content": plan_text}]
-    current_file = request.get("currentFile")
 
     try:
         result = run_agent(messages, current_file=current_file)
         content = str(result["text"])
-        add_message(session_id, "assistant", content)
+        add_message(session_id, "assistant", content, mode="agent")
         return {
             "sessionId": session_id,
             "message": {"role": "assistant", "content": content},
@@ -185,7 +411,7 @@ async def execute_plan(request: dict):
         }
     except Exception as e:
         err_msg = f"Error: {e}. Ensure gws is installed and authenticated (gws auth login -s slides,drive)"
-        add_message(session_id, "assistant", err_msg)
+        add_message(session_id, "assistant", err_msg, mode="agent")
         return {
             "sessionId": session_id,
             "error": str(e),
@@ -213,13 +439,13 @@ async def chat(request: dict):
         user_content = last_user.get("content", "")
         if isinstance(user_content, list):
             user_content = user_content[0].get("text", "") if user_content else ""
-        add_message(session_id, "user", str(user_content))
+        add_message(session_id, "user", str(user_content), mode="agent")
         update_session_title(session_id, (str(user_content)[:100]) or "New chat")
 
     try:
         result = run_agent(messages, current_file=current_file, current_document=current_document)
         content = str(result["text"])
-        add_message(session_id, "assistant", content)
+        add_message(session_id, "assistant", content, mode="agent")
         return {
             "sessionId": session_id,
             "message": {"role": "assistant", "content": content},
@@ -230,7 +456,7 @@ async def chat(request: dict):
         }
     except Exception as e:
         err_msg = f"Error: {e}. Ensure gws is installed and authenticated (gws auth login -s slides,drive)"
-        add_message(session_id, "assistant", err_msg)
+        add_message(session_id, "assistant", err_msg, mode="agent")
         return {
             "sessionId": session_id,
             "error": str(e),
@@ -292,6 +518,31 @@ async def documents_ingest(file: UploadFile = File(...)):
 async def documents_list(limit: int = 100):
     """List ingested documents (upload_id, filename, page_count, has_faiss)."""
     return {"documents": list_docs_db(limit=limit)}
+
+
+@app.get("/api/slide-templates")
+async def slide_templates_list(limit: int = 100):
+    """List saved slide templates (presentation types + slide guidance)."""
+    return {"templates": list_slide_templates(limit=limit)}
+
+
+@app.post("/api/slide-templates")
+async def slide_templates_save(request: dict):
+    """
+    Save or update a slide template.
+    Body: {name: str, slides: [{title, guidance}]}
+    """
+    name = (request.get("name") or "").strip()
+    slides = request.get("slides") or []
+    if not name:
+        raise HTTPException(status_code=400, detail="name required")
+    if not isinstance(slides, list):
+        raise HTTPException(status_code=400, detail="slides must be a list")
+    try:
+        upsert_slide_template(name, slides)
+        return {"ok": True}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/api/tools")

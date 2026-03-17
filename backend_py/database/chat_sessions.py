@@ -59,19 +59,21 @@ def add_message(
     role: str,
     content: str,
     plan_json: str | None = None,
+    mode: str | None = None,
 ) -> int:
     """Add a message. Returns message id. plan_json is stored for assistant plan messages only."""
     db = SessionLocal()
     try:
         db.execute(
             text(
-                "INSERT INTO chat_messages (session_id, role, content, plan_json) VALUES (:sid, :role, :content, :plan)"
+                "INSERT INTO chat_messages (session_id, role, content, plan_json, mode) VALUES (:sid, :role, :content, :plan, :mode)"
             ),
             {
                 "sid": session_id,
                 "role": role,
                 "content": content or "",
                 "plan": plan_json,
+                "mode": (mode or "agent"),
             },
         )
         db.execute(
@@ -122,7 +124,7 @@ def get_session_with_messages(session_id: int) -> dict[str, Any] | None:
 
         msgs = db.execute(
             text(
-                "SELECT id, role, content, plan_json, created_at FROM chat_messages WHERE session_id = :id ORDER BY id ASC"
+                "SELECT id, role, content, plan_json, mode, created_at FROM chat_messages WHERE session_id = :id ORDER BY id ASC"
             ),
             {"id": session_id},
         ).fetchall()
@@ -133,7 +135,7 @@ def get_session_with_messages(session_id: int) -> dict[str, Any] | None:
                 "id": m[0],
                 "role": m[1],
                 "content": m[2] or "",
-                "createdAt": m[4],
+                "createdAt": m[5],
             }
             if m[3]:
                 try:
@@ -141,6 +143,8 @@ def get_session_with_messages(session_id: int) -> dict[str, Any] | None:
                     msg["hasPlan"] = True
                 except json.JSONDecodeError:
                     pass
+            if m[4]:
+                msg["mode"] = m[4] or "agent"
             messages.append(msg)
 
         return {

@@ -4,6 +4,86 @@ Google Slides & Drive tools - gws CLI wrappers
 from .executor import run_gws
 
 
+def _hex_to_rgb_floats(hex_str: str) -> dict:
+    """Convert '#RRGGBB' -> {red, green, blue} floats 0..1 for Slides API rgbColor."""
+    s = (hex_str or "").strip()
+    if s.startswith("#"):
+        s = s[1:]
+    if len(s) != 6:
+        return {"red": 0.0, "green": 0.0, "blue": 0.0}
+    try:
+        r = int(s[0:2], 16) / 255.0
+        g = int(s[2:4], 16) / 255.0
+        b = int(s[4:6], 16) / 255.0
+        return {"red": r, "green": g, "blue": b}
+    except ValueError:
+        return {"red": 0.0, "green": 0.0, "blue": 0.0}
+
+
+def _make_color_scheme(theme_colors: dict | None) -> dict | None:
+    """
+    Build a Slides ColorScheme payload for updatePageProperties.pageProperties.colorScheme.
+    Slides API expects rgb floats, not hex strings.
+    """
+    if not isinstance(theme_colors, dict) or not theme_colors:
+        return None
+
+    bg = theme_colors.get("background_color") or "#FFFFFF"
+    text = theme_colors.get("body_text_color") or "#111111"
+    heading = theme_colors.get("heading_color") or text
+    accent = theme_colors.get("accent_color") or heading
+    shapes = theme_colors.get("shapes_color") or accent
+    charts = theme_colors.get("charts_color") or shapes
+
+    # Slides color schemes are keyed by ThemeColorType and must appear in a stable order.
+    # We map our logical theme_colors to a minimal, coherent scheme.
+    ordered_types = [
+        "DARK1",
+        "LIGHT1",
+        "DARK2",
+        "LIGHT2",
+        "ACCENT1",
+        "ACCENT2",
+        "ACCENT3",
+        "ACCENT4",
+        "ACCENT5",
+        "ACCENT6",
+        "HYPERLINK",
+        "FOLLOWED_HYPERLINK",
+        "TEXT1",
+        "BACKGROUND1",
+        "TEXT2",
+        "BACKGROUND2",
+    ]
+
+    # Pick reasonable assignments. DARK/LIGHT are the base text/background pair.
+    mapping = {
+        "DARK1": text,
+        "LIGHT1": bg,
+        "DARK2": heading,
+        "LIGHT2": bg,
+        "ACCENT1": accent,
+        "ACCENT2": shapes,
+        "ACCENT3": charts,
+        "ACCENT4": accent,
+        "ACCENT5": shapes,
+        "ACCENT6": charts,
+        "HYPERLINK": accent,
+        "FOLLOWED_HYPERLINK": charts,
+        "TEXT1": text,
+        "BACKGROUND1": bg,
+        "TEXT2": heading,
+        "BACKGROUND2": bg,
+    }
+
+    return {
+        "colors": [
+            {"type": t, "color": _hex_to_rgb_floats(mapping[t])}
+            for t in ordered_types
+        ]
+    }
+
+
 def presentations_create(title: str = "Untitled Presentation") -> dict:
     """Create a new Google Slides presentation."""
     r = run_gws(["slides", "presentations", "create"], json_body={"title": title})
@@ -46,3 +126,141 @@ def drive_files_list(
     if fields:
         params["fields"] = fields
     return run_gws(["drive", "files", "list"], params=params)
+
+
+def scaffold_presentation(
+    title: str,
+    num_slides: int,
+    theme_colors: dict | None = None,
+    logo_url: str | None = None,
+) -> dict:
+    """
+    Create a new presentation with a global theme color scheme + N slides scaffolded.
+    - Updates master color scheme (Theme Builder-like) via updatePageProperties.colorScheme on the master.
+    - Creates (num_slides - 1) slides with stable placeholderIdMappings (TITLE/BODY).
+    - Applies background fill to each slide and optionally adds the logo image to each slide.
+    Returns {presentationId, presentationUrl, slides:[{pageObjectId,titleObjectId,bodyObjectId}], masterObjectId?}
+    """
+    num_slides = int(num_slides or 0)
+    if num_slides <= 0:
+        raise ValueError("num_slides must be >= 1")
+
+    created = presentations_create(title=title or "Untitled Presentation")
+    if not isinstance(created, dict) or not created.get("presentationId"):
+        raise RuntimeError("Failed to create presentation")
+    presentation_id = created["presentationId"]
+
+    pres = presentations_get(presentation_id)
+    if not isinstance(pres, dict):
+        raise RuntimeError("Failed to fetch presentation after create")
+
+    # First slide already exists (Google creates one default slide).
+    slides_arr = pres.get("slides") or []
+    if not slides_arr:
+        raise RuntimeError("Presentation has no slides")
+    first_slide_obj = slides_arr[0]
+    first_slide_id = first_slide_obj.get("objectId") or first_slide_obj.get("pageObjectId")
+    if not first_slide_id:
+        raise RuntimeError("Could not determine first slide objectId")
+
+    # Find a master objectId for true Theme Builder-like color scheme updates.
+    masters = pres.get("masters") or []
+    master_id = None
+    if masters and isinstance(masters, list) and isinstance(masters[0], dict):
+        master_id = masters[0].get("objectId")
+
+    requests: list[dict] = []
+
+    # 1) Update the master color scheme (global theme colors).
+    scheme = _make_color_scheme(theme_colors)
+    if master_id and scheme:
+        requests.append(
+            {
+                "updatePageProperties": {
+                    "objectId": master_id,
+                    "pageProperties": {"colorScheme": scheme},
+                    "fields": "colorScheme.colors",
+                }
+            }
+        )
+
+    # 2) Create truly blank slides (no layout placeholders) and delete the default first slide.
+    # We'll create slide_1..slide_N with predefinedLayout BLANK, then remove the auto-created slide.
+    scaffold = []
+    for idx in range(1, num_slides + 1):
+        slide_id = f"slide_{idx}"
+        requests.append(
+            {
+                "createSlide": {
+                    "objectId": slide_id,
+                    "insertionIndex": idx - 1,
+                    "slideLayoutReference": {"predefinedLayout": "BLANK"},
+                }
+            }
+        )
+        scaffold.append({"pageObjectId": slide_id, "titleObjectId": None, "bodyObjectId": None})
+
+    # Remove the default slide so the deck contains only our blank scaffold slides.
+    requests.append({"deleteObject": {"objectId": first_slide_id}})
+
+    # 3) Apply background color per slide (helps even if master scheme isn't applied everywhere).
+    bg_hex = None
+    if isinstance(theme_colors, dict):
+        bg_hex = theme_colors.get("background_color")
+    if bg_hex:
+        rgb = _hex_to_rgb_floats(bg_hex)
+        for s in scaffold:
+            requests.append(
+                {
+                    "updatePageProperties": {
+                        "objectId": s["pageObjectId"],
+                        "pageProperties": {
+                            "pageBackgroundFill": {
+                                "solidFill": {"color": {"rgbColor": rgb}}
+                            }
+                        },
+                        "fields": "pageBackgroundFill",
+                    }
+                }
+            )
+
+    # 4) Add logo image to every slide if provided.
+    if logo_url:
+        # Small logo, top-right. Adjust sizes as needed.
+        w = 600000  # EMU
+        h = 600000
+        tx = 9144000 - w - 250000
+        ty = 250000
+        for i, s in enumerate(scaffold, start=1):
+            requests.append(
+                {
+                    "createImage": {
+                        "objectId": f"logo_{i}",
+                        "url": logo_url,
+                        "elementProperties": {
+                            "pageObjectId": s["pageObjectId"],
+                            "size": {
+                                "width": {"magnitude": w, "unit": "EMU"},
+                                "height": {"magnitude": h, "unit": "EMU"},
+                            },
+                            "transform": {
+                                "scaleX": 1,
+                                "scaleY": 1,
+                                "translateX": int(tx),
+                                "translateY": int(ty),
+                                "unit": "EMU",
+                            },
+                        },
+                    }
+                }
+            )
+
+    if requests:
+        presentations_batch_update(presentation_id, requests)
+
+    return {
+        "presentationId": presentation_id,
+        "presentationUrl": created.get("presentationUrl"),
+        "masterObjectId": master_id,
+        "slides": scaffold,
+    }

@@ -5,6 +5,7 @@ from .tools import (
     presentations_batch_update,
     presentations_create,
     presentations_get,
+    scaffold_presentation,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "presentations_batch_update",
     "pages_get_thumbnail",
     "drive_files_list",
+    "scaffold_presentation",
 ]

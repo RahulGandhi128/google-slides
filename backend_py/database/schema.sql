@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
     content TEXT NOT NULL DEFAULT '',
     plan_json TEXT,
+    mode TEXT DEFAULT 'agent',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (session_id) REFERENCES chat_sessions(id)
 );
@@ -49,3 +50,14 @@ CREATE TABLE IF NOT EXISTS document_indexes (
     docstore_blob BLOB NOT NULL,
     FOREIGN KEY (upload_id) REFERENCES documents(upload_id)
 );
+
+-- Saved slide templates (presentation types + slide guidance)
+CREATE TABLE IF NOT EXISTS slide_templates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  slides_json TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_slide_templates_name ON slide_templates(name);

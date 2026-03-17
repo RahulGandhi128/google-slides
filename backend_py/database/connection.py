@@ -102,3 +102,11 @@ def init_db():
             )
         """))
         conn.commit()
+
+    # Migrations: add mode column to chat_messages if missing (for agent type)
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE chat_messages ADD COLUMN mode TEXT DEFAULT 'agent'"))
+            conn.commit()
+        except Exception:
+            pass  # column may already exist

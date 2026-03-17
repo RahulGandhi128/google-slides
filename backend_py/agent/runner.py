@@ -16,6 +16,7 @@ from gws import (
     presentations_batch_update,
     presentations_create,
     presentations_get,
+    scaffold_presentation,
 )
 from icon.icons import search_icon, svg_to_png_bytes
 
@@ -92,6 +93,31 @@ TOOL_DECLARATIONS = [
             "required": ["presentationId", "pageObjectId", "query"],
         },
     ),
+    FunctionDeclaration(
+        name="scaffold_presentation",
+        description="Create a new presentation with a global theme color scheme (Theme Builder-like), then scaffold a fixed number of slides with a shared background and optional logo on every slide. Returns presentationId and slide objectIds to fill content next.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Presentation title"},
+                "numSlides": {"type": "integer", "description": "Total number of slides to scaffold (>=1)"},
+                "themeColors": {
+                    "type": "object",
+                    "description": "Theme colors as hex strings (e.g. #RRGGBB). Used to set master color scheme and slide backgrounds.",
+                    "properties": {
+                        "heading_color": {"type": "string"},
+                        "body_text_color": {"type": "string"},
+                        "background_color": {"type": "string"},
+                        "accent_color": {"type": "string"},
+                        "shapes_color": {"type": "string"},
+                        "charts_color": {"type": "string"},
+                    },
+                },
+                "logoUrl": {"type": "string", "description": "Optional logo image URL (or data URL) to place on every slide"},
+            },
+            "required": ["title", "numSlides"],
+        },
+    ),
 ]
 
 SYSTEM_INSTRUCTION = """You are a Google Workspace assistant for Slides and Drive, acting as a professional designer and content creator. Work step-by-step until the task is complete.
@@ -107,6 +133,11 @@ When the user asks to create a presentation WITH content:
 2. Get presentationId from the response
 3. Call presentations_get to see slide structure and placeholder objectIds
 4. Call presentations_batch_update with createSlide and insertText requests
+
+When building a presentation FROM A PLAN (title + N slides + theme colors):
+- First call scaffold_presentation(title, numSlides=N, themeColors from the plan, logoUrl if provided).
+- Use the returned presentationId and slide objectIds to fill content with presentations_batch_update (insertText, updateTextStyle, createShape, createImage, etc.).
+- Do NOT call presentations_create again and do NOT create extra slides beyond the plan count unless explicitly requested.
 
 BULLETED LISTS - For body text with bullets:
 - Use insertText with actual newline characters (U+000A) between items. Do NOT use literal backslash-n (\\n) in the text.
@@ -128,13 +159,15 @@ PLACEHOLDER TRICK - Use placeholderIdMappings when creating slides so you know t
 
 {"createSlide": {"objectId": "slide_geo", "insertionIndex": 1, "slideLayoutReference": {"predefinedLayout": "TITLE_AND_BODY"}, "placeholderIdMappings": [{"layoutPlaceholder": {"type": "TITLE", "index": 0}, "objectId": "title_box_geo"}, {"layoutPlaceholder": {"type": "BODY", "index": 0}, "objectId": "body_box_geo"}]}}
 
+For TITLE_AND_TWO_COLUMNS layout use type "BODY" with index 0 and index 1 (NOT BODY_1 or BODY_2): [{"layoutPlaceholder": {"type": "BODY", "index": 0}, "objectId": "body_left"}, {"layoutPlaceholder": {"type": "BODY", "index": 1}, "objectId": "body_right"}]. Valid layoutPlaceholder types are only: NONE, BODY, CHART, CLIP_ART, CENTERED_TITLE, DIAGRAM, DATE_AND_TIME, FOOTER, HEADER, MEDIA, OBJECT, PICTURE, SLIDE_NUMBER, SUBTITLE, TABLE, TITLE, SLIDE_IMAGE.
+
 Then use insertText with objectId "title_box_geo" and "body_box_geo" in the same requests array. Never guess IDs like slide_2_i0 - they do not exist until you assign them via placeholderIdMappings.
 
 AESTHETICS - You CAN add colors, themes, and styling. Use presentations_batch_update with these requests:
 - Background color: updatePageProperties with pageBackgroundFill. Example: {"updatePageProperties": {"objectId": "slide_id", "pageProperties": {"pageBackgroundFill": {"solidFill": {"color": {"rgbColor": {"red": 0.0, "green": 0.1, "blue": 0.2}}}}}, "fields": "pageBackgroundFill"}}
-- Decorative shapes: createShape to add colored rectangles (sidebars, header lines, accent bars). Use orange, white, green for India-themed slides.
-- Text styling: updateTextStyle to make fonts bold and change colors for contrast with the background.
-- CRITICAL - Colors: Always wrap RGB in rgbColor. Use {"color": {"rgbColor": {"red": 0.5, "green": 0.27, "blue": 0.07}}} NOT {"color": {"red": ..., "green": ..., "blue": ...}}.
+- Decorative shapes: createShape must use elementProperties for pageObjectId, size, transform. Example: {"createShape": {"objectId": "bar_id", "shapeType": "RECTANGLE", "elementProperties": {"pageObjectId": "slide_id", "size": {"width": {"magnitude": 9144000, "unit": "EMU"}, "height": {"magnitude": 95250, "unit": "EMU"}}, "transform": {"scaleX": 1, "scaleY": 1, "translateX": 0, "translateY": 0, "unit": "EMU"}}}}
+- Text styling: updateTextStyle for color must use foregroundColor.opaqueColor (NOT solidFill). Example: {"updateTextStyle": {"objectId": "text_id", "textRange": {"type": "ALL"}, "style": {"foregroundColor": {"opaqueColor": {"rgbColor": {"red": 0.04, "green": 0.33, "blue": 0.45}}}, "fontSize": {"magnitude": 16, "unit": "PT"}, "bold": true}, "fields": "foregroundColor,fontSize,bold"}}
+- CRITICAL - Colors in updateTextStyle: use "foregroundColor": {"opaqueColor": {"rgbColor": {"red": r, "green": g, "blue": b}}} with 0-1 floats. Never use foregroundColor.solidFill.
 
 updatePageElementTransform - Use for precise alignment and affine transformations (moving, scaling, shearing). Ensures elements follow a design grid instead of random placement:
 - applyMode: "ABSOLUTE" replaces the transform; "RELATIVE" multiplies with existing.
@@ -205,10 +238,50 @@ def _to_jsonable(obj):
     return str(obj)
 
 
+def _make_small_icon_data_url(svg: str, max_url_len: int = 2000) -> str | None:
+    """
+    Render SVG → PNG, aggressively shrink until the data URL is under max_url_len characters.
+    Returns data URL or None if it cannot be made small enough.
+    """
+    import base64
+    from io import BytesIO
+
+    try:
+        from PIL import Image
+    except ImportError:
+        # Pillow not available; fall back to single-size render.
+        png_bytes = svg_to_png_bytes(svg, output_width=32, output_height=32)
+        b64 = base64.b64encode(png_bytes).decode("ascii")
+        data_url = f"data:image/png;base64,{b64}"
+        return data_url if len(data_url) <= max_url_len else None
+
+    width, height = 32, 32  # start small
+
+    for _attempt in range(6):
+        png_bytes = svg_to_png_bytes(svg, output_width=width, output_height=height)
+        try:
+            img = Image.open(BytesIO(png_bytes))
+            img = img.convert("RGBA")
+            img_p = img.quantize(colors=16, method=Image.MEDIANCUT)
+            buf = BytesIO()
+            img_p.save(buf, format="PNG", optimize=True, compress_level=9)
+            png_bytes = buf.getvalue()
+        except Exception:
+            pass
+
+        b64 = base64.b64encode(png_bytes).decode("ascii")
+        data_url = f"data:image/png;base64,{b64}"
+        if len(data_url) <= max_url_len:
+            return data_url
+
+        width = max(8, width // 2)
+        height = max(8, height // 2)
+
+    return None
+
+
 def _execute_add_icon_to_slide(args: dict) -> dict:
     """Search icon, convert to PNG, add to slide via createImage. Keeps SVG/URL handling internal."""
-    import base64
-
     presentation_id = args.get("presentationId")
     page_object_id = args.get("pageObjectId")
     query = args.get("query", "").strip()
@@ -228,14 +301,17 @@ def _execute_add_icon_to_slide(args: dict) -> dict:
         if not svg:
             return {"success": False, "error": f"Icon '{name}' has no SVG content"}
 
-        png_bytes = svg_to_png_bytes(svg, output_width=64, output_height=64)
-        b64 = base64.b64encode(png_bytes).decode("ascii")
-        data_url = f"data:image/png;base64,{b64}"
-
-        # Slides API URL limit 2KB. Use HTTP endpoint if data URL exceeds limit and ICON_BASE_URL is set.
-        icon_base_url = os.environ.get("ICON_BASE_URL", "").rstrip("/")
-        if len(data_url) > 2000 and icon_base_url:
-            image_url = f"{icon_base_url}/api/icon/png?name={name}"
+        data_url = _make_small_icon_data_url(svg, max_url_len=2000)
+        if not data_url:
+            # As a fallback, if ICON_BASE_URL is set, use HTTP endpoint; otherwise return error.
+            icon_base_url = os.environ.get("ICON_BASE_URL", "").rstrip("/")
+            if icon_base_url:
+                image_url = f"{icon_base_url}/api/icon/png?name={name}"
+            else:
+                return {
+                    "success": False,
+                    "error": "Icon SVG cannot be embedded under 2KB and no ICON_BASE_URL is configured.",
+                }
         else:
             image_url = data_url
 
@@ -302,6 +378,13 @@ def _execute_tool(name: str, args: dict) -> str:
             )
         elif name == "add_icon_to_slide":
             r = _execute_add_icon_to_slide(args)
+        elif name == "scaffold_presentation":
+            r = scaffold_presentation(
+                title=args.get("title", "Untitled Presentation"),
+                num_slides=args.get("numSlides", 1),
+                theme_colors=args.get("themeColors") or {},
+                logo_url=args.get("logoUrl"),
+            )
         else:
             return f"Unknown tool: {name}"
         out = json.dumps(r, indent=2) if isinstance(r, dict) else str(r)
