@@ -61,3 +61,29 @@ CREATE TABLE IF NOT EXISTS slide_templates (
 );
 
 CREATE INDEX IF NOT EXISTS idx_slide_templates_name ON slide_templates(name);
+
+-- Branding logos (two roles: 'my' and 'target') with small data URLs for embedding
+CREATE TABLE IF NOT EXISTS branding_logos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  role TEXT NOT NULL UNIQUE CHECK (role IN ('my', 'target')),
+  filename TEXT,
+  content_type TEXT,
+  png_bytes BLOB,
+  small_data_url TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Global logo placement preferences (single row, id=1)
+CREATE TABLE IF NOT EXISTS branding_logo_prefs (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  my_corner TEXT,
+  target_corner TEXT,
+  my_width_emu INTEGER,
+  my_height_emu INTEGER,
+  my_margin_emu INTEGER,
+  target_width_emu INTEGER,
+  target_height_emu INTEGER,
+  target_margin_emu INTEGER,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

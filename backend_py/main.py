@@ -21,18 +21,26 @@ def _json_safe(obj):
         return {}
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 import tempfile
 
 from agent import run_agent
 from agent.planner import generate_plan
 from agent.research import run_research_agent
+from agent_excel import run_sheets_agent
 from gws import drive_files_list, presentations_get
 from database import init_db
 from database.drive_files import upsert_drive_files, get_drive_files_from_db
 from database.documents import ingest_document, list_documents as list_docs_db
 from database.slide_templates import list_templates as list_slide_templates, upsert_template as upsert_slide_template
+from database.branding_logos import (
+    list_logos as list_branding_logos,
+    upsert_logo as upsert_branding_logo,
+    get_small_data_url_by_role,
+    upsert_logo_prefs,
+    get_logo_prefs,
+)
 from database.chat_sessions import (
     create_session,
     create_session_if_needed,
@@ -77,12 +85,41 @@ async def plan(request: dict):
     document_context = request.get("documentContext")
     design_settings = request.get("designSettings") or {}
     color_palette = request.get("colorPalette")  # optional: { "dominant": "#hex", "palette": ["#hex", ...] }
+    current_file = request.get("currentFile") or {}
+    page_size_emu = None
+    try:
+        pres_id = (current_file.get("id") or "").strip() if isinstance(current_file, dict) else ""
+        if pres_id:
+            pres = presentations_get(pres_id)
+            ps = pres.get("pageSize") or {}
+            w = (ps.get("width") or {}) if isinstance(ps, dict) else {}
+            h = (ps.get("height") or {}) if isinstance(ps, dict) else {}
+            # Slides API typically returns PT magnitudes here.
+            def _dim_to_emu(dim: dict) -> int | None:
+                try:
+                    mag = float(dim.get("magnitude"))
+                    unit = (dim.get("unit") or "").upper()
+                    if unit == "EMU":
+                        return int(round(mag))
+                    if unit == "PT":
+                        return int(round(mag * 12700.0))
+                except Exception:
+                    return None
+                return None
+
+            w_emu = _dim_to_emu(w)
+            h_emu = _dim_to_emu(h)
+            if w_emu and h_emu:
+                page_size_emu = {"pageWidthEmu": w_emu, "pageHeightEmu": h_emu, "marginEmu": 457200}
+    except Exception:
+        page_size_emu = None
     try:
         plan_obj, raw = generate_plan(
             topic,
             document_context=document_context,
             design_settings=design_settings,
             color_palette=color_palette,
+            page_size_emu=page_size_emu,
         )
         plan_json = json.dumps(plan_obj) if plan_obj else None
         add_message(session_id, "assistant", raw, plan_json=plan_json, mode="design")
@@ -357,6 +394,9 @@ async def execute_plan(request: dict):
     design_instruction = _design_instruction(design_settings)
     theme_colors = aesthetics.get("theme_colors") or {}
 
+    # Optional logo placement overrides for this build
+    logo_overrides = request.get("logoOverrides") or {}
+
     if modify_existing:
         plan_text = (
             "Update the EXISTING Google Slides presentation. Do NOT call scaffold_presentation or presentations_create.\n"
@@ -374,7 +414,49 @@ async def execute_plan(request: dict):
             plan_text += design_instruction.strip() + "\n\n"
         plan_text += "Slides to update (match by slide number / order):\n"
     else:
-        plan_text = f"Create a Google Slides presentation from this plan. Title: {title}\n\n"
+        # Deterministically scaffold a new presentation (theme + logos) BEFORE calling the agent,
+        # so the LLM never has to handle data URLs and can't forget to add logos.
+        from gws import scaffold_presentation
+
+        # Load stored logos (small data URLs) and preferences; allow request overrides.
+        prefs = get_logo_prefs()
+        my_corner = (logo_overrides.get("myCorner") or prefs.get("myCorner") or "top_left")
+        target_corner = (logo_overrides.get("targetCorner") or prefs.get("targetCorner") or "top_right")
+
+        my_w = logo_overrides.get("myWidthEmu") or prefs.get("myWidthEmu") or 600000
+        my_h = logo_overrides.get("myHeightEmu") or prefs.get("myHeightEmu") or 600000
+        my_m = logo_overrides.get("myMarginEmu") or prefs.get("myMarginEmu") or 250000
+        tgt_w = logo_overrides.get("targetWidthEmu") or prefs.get("targetWidthEmu") or 600000
+        tgt_h = logo_overrides.get("targetHeightEmu") or prefs.get("targetHeightEmu") or 600000
+        tgt_m = logo_overrides.get("targetMarginEmu") or prefs.get("targetMarginEmu") or 250000
+
+        logos = []
+        my_url = get_small_data_url_by_role("my")
+        if my_url:
+            logos.append({"url": my_url, "corner": my_corner, "idPrefix": "logo_my", "widthEmu": int(my_w), "heightEmu": int(my_h), "marginEmu": int(my_m)})
+        tgt_url = get_small_data_url_by_role("target")
+        if tgt_url:
+            logos.append({"url": tgt_url, "corner": target_corner, "idPrefix": "logo_target", "widthEmu": int(tgt_w), "heightEmu": int(tgt_h), "marginEmu": int(tgt_m)})
+
+        scaffolded = scaffold_presentation(
+            title=title,
+            num_slides=max(1, len(slides) if isinstance(slides, list) else 1),
+            theme_colors=theme_colors if isinstance(theme_colors, dict) else {},
+            logos=logos if logos else None,
+        )
+        current_file = {
+            "id": scaffolded.get("presentationId"),
+            "name": title,
+            "mimeType": "application/vnd.google-apps.presentation",
+        }
+        modify_existing = True
+
+        plan_text = (
+            "Update the EXISTING Google Slides presentation. Do NOT call scaffold_presentation or presentations_create.\n"
+            f"The presentation to update has presentationId: {current_file.get('id')} and name: {current_file.get('name', '')}.\n"
+            "The presentation has already been scaffolded with the correct slide count, theme colors, and logos on every slide.\n"
+            "Use presentations_get to load the current slides and structure, then use presentations_batch_update to fill in each slide according to the plan below.\n\n"
+        )
         plan_text += f"Theme/aesthetics: {aesthetics.get('theme', '')}. Primary color: {aesthetics.get('primary_color', '')}. Icon style: {aesthetics.get('suggested_icons_style', '')}.\n\n"
         if theme_colors:
             plan_text += "Theme colors (use these for styling):\n"
@@ -384,7 +466,7 @@ async def execute_plan(request: dict):
             plan_text += "\n"
         if design_instruction:
             plan_text += design_instruction.strip() + "\n\n"
-        plan_text += "Slides to create:\n"
+        plan_text += "Slides to update (match by slide number / order):\n"
 
     for s in slides:
         plan_text += f"\n--- Slide {s.get('slide_number', '?')}: {s.get('title', '')} ---\n"
@@ -412,6 +494,51 @@ async def execute_plan(request: dict):
     except Exception as e:
         err_msg = f"Error: {e}. Ensure gws is installed and authenticated (gws auth login -s slides,drive)"
         add_message(session_id, "assistant", err_msg, mode="agent")
+        return {
+            "sessionId": session_id,
+            "error": str(e),
+            "message": {"role": "assistant", "content": err_msg},
+            "toolCalls": [],
+        }
+
+
+@app.post("/api/sheets-chat")
+async def sheets_chat(request: dict):
+    """Sheets agent chat: read/write/format Google Sheets via gws Sheets API."""
+    log = logging.getLogger("main.sheets_chat")
+    messages = request.get("messages", [])
+    if not messages:
+        raise HTTPException(status_code=400, detail="messages array required")
+
+    spreadsheet_id = request.get("spreadsheetId") or request.get("spreadsheet_id")
+    log.info("sheets-chat request: spreadsheetId=%r messages=%d", spreadsheet_id, len(messages))
+
+    session_id = create_session_if_needed(request.get("sessionId"))
+
+    last_user = next((m for m in reversed(messages) if m.get("role") == "user"), None)
+    if last_user:
+        user_content = last_user.get("content", "")
+        if isinstance(user_content, list):
+            user_content = user_content[0].get("text", "") if user_content else ""
+        add_message(session_id, "user", str(user_content), mode="sheets")
+        update_session_title(session_id, (str(user_content)[:100]) or "New chat")
+
+    try:
+        result = run_sheets_agent(messages, spreadsheet_id=spreadsheet_id)
+        content = str(result["text"])
+        add_message(session_id, "assistant", content, mode="sheets")
+        return {
+            "sessionId": session_id,
+            "message": {"role": "assistant", "content": content},
+            "toolCalls": [
+                {"name": str(t["name"]), "args": _json_safe(t.get("args", {}))}
+                for t in result.get("tool_calls", [])
+            ],
+        }
+    except Exception as e:
+        log.exception("sheets-chat failed")
+        err_msg = f"Error: {e}. Ensure gws is installed and authenticated for Sheets."
+        add_message(session_id, "assistant", err_msg, mode="sheets")
         return {
             "sessionId": session_id,
             "error": str(e),
@@ -524,6 +651,72 @@ async def documents_list(limit: int = 100):
 async def slide_templates_list(limit: int = 100):
     """List saved slide templates (presentation types + slide guidance)."""
     return {"templates": list_slide_templates(limit=limit)}
+
+
+@app.get("/api/branding/logos")
+async def branding_logos_list():
+    """List stored branding logos (my/target)."""
+    return {"logos": list_branding_logos(), "prefs": get_logo_prefs()}
+
+
+@app.post("/api/branding/logos")
+async def branding_logos_upload(
+    role: str = Form(...),
+    file: UploadFile = File(...),
+):
+    """Upload a logo PNG/JPG and store a small data URL (<=2KB) for embedding."""
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="empty file")
+    from functions.image_data_url import make_small_png_data_url
+
+    # Convert non-PNG to PNG bytes via Pillow if available
+    png_bytes = content
+    ctype = (file.content_type or "").lower()
+    if ctype not in ("image/png", "image/x-png"):
+        try:
+            from PIL import Image
+            from io import BytesIO
+
+            img = Image.open(BytesIO(content)).convert("RGBA")
+            buf = BytesIO()
+            img.save(buf, format="PNG", optimize=True)
+            png_bytes = buf.getvalue()
+            ctype = "image/png"
+        except Exception:
+            # Fall back: treat as bytes; may fail later if not PNG-compatible
+            png_bytes = content
+            ctype = file.content_type or "application/octet-stream"
+
+    data_url, best_len = make_small_png_data_url(png_bytes, max_url_len=2000, return_best_len=True)
+    if not data_url:
+        detail = "logo cannot be shrunk under ~2KB for data URL embedding"
+        if best_len:
+            detail += f" (best achieved length: {best_len} chars)"
+        detail += ". Try a simpler/smaller logo PNG or use a tunnel/hosted URL."
+        raise HTTPException(status_code=400, detail=detail)
+
+    meta = upsert_branding_logo(role=role, filename=file.filename or "", content_type=ctype, png_bytes=png_bytes, small_data_url=data_url)
+    return {"ok": True, "logo": meta, "dataUrlLength": len(data_url)}
+
+
+@app.post("/api/branding/logo-prefs")
+async def branding_logo_prefs_save(request: dict):
+    """Save global logo corner preferences."""
+    try:
+        upsert_logo_prefs(
+            my_corner=request.get("myCorner"),
+            target_corner=request.get("targetCorner"),
+            my_width_emu=request.get("myWidthEmu"),
+            my_height_emu=request.get("myHeightEmu"),
+            my_margin_emu=request.get("myMarginEmu"),
+            target_width_emu=request.get("targetWidthEmu"),
+            target_height_emu=request.get("targetHeightEmu"),
+            target_margin_emu=request.get("targetMarginEmu"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "prefs": get_logo_prefs()}
 
 
 @app.post("/api/slide-templates")

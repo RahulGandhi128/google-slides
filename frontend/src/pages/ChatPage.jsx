@@ -313,9 +313,22 @@ function ChatPage() {
   const [designOutlineDialogOpen, setDesignOutlineDialogOpen] = useState(false);
   const [designOutlineDialogContent, setDesignOutlineDialogContent] = useState('');
   const [designOutlineDialogMessageIndex, setDesignOutlineDialogMessageIndex] = useState(null);
-  const [designOutlineLogoPreview, setDesignOutlineLogoPreview] = useState(null);
+  const [designOutlineMyLogoPreview, setDesignOutlineMyLogoPreview] = useState(null);
+  const [designOutlineTargetLogoPreview, setDesignOutlineTargetLogoPreview] = useState(null);
+  const [designOutlineMyCorner, setDesignOutlineMyCorner] = useState('top_left');
+  const [designOutlineTargetCorner, setDesignOutlineTargetCorner] = useState('top_right');
+  const [designOutlineMyWidthEmu, setDesignOutlineMyWidthEmu] = useState(600000);
+  const [designOutlineMyHeightEmu, setDesignOutlineMyHeightEmu] = useState(600000);
+  const [designOutlineMyMarginEmu, setDesignOutlineMyMarginEmu] = useState(250000);
+  const [designOutlineTargetWidthEmu, setDesignOutlineTargetWidthEmu] = useState(600000);
+  const [designOutlineTargetHeightEmu, setDesignOutlineTargetHeightEmu] = useState(600000);
+  const [designOutlineTargetMarginEmu, setDesignOutlineTargetMarginEmu] = useState(250000);
+  const [designOutlineTab, setDesignOutlineTab] = useState('logos'); // 'logos' | 'advanced'
+  const [logoOverrides, setLogoOverrides] = useState(null);
   const [designOutlineExtracted, setDesignOutlineExtracted] = useState(null);
   const [designOutlineExtracting, setDesignOutlineExtracting] = useState(false);
+  const [designOutlineSavingBranding, setDesignOutlineSavingBranding] = useState(false);
+  const [designOutlineDbBranding, setDesignOutlineDbBranding] = useState(null);
   const [extractLoading, setExtractLoading] = useState(false);
   const [pinnedExtractedSlides, setPinnedExtractedSlides] = useState(null);
   const [findReplacementsLoading, setFindReplacementsLoading] = useState(false);
@@ -377,6 +390,8 @@ function ChatPage() {
   const fileInputRef = useRef(null);
   const mentionPopupRef = useRef(null);
   const presentationTypeMenuRef = useRef(null);
+  const designOutlineMyLogoInputRef = useRef(null);
+  const designOutlineTargetLogoInputRef = useRef(null);
   const designOutlineLogoInputRef = useRef(null);
 
   useEffect(() => {
@@ -658,61 +673,159 @@ function ChatPage() {
   };
 
   const handleOpenDesignOutlineDialog = (outlineContent, messageIndex) => {
-    if (designOutlineLogoPreview) URL.revokeObjectURL(designOutlineLogoPreview);
+    const revokeIfBlob = (url) => {
+      if (typeof url === 'string' && url.startsWith('blob:')) URL.revokeObjectURL(url);
+    };
+    revokeIfBlob(designOutlineMyLogoPreview);
+    revokeIfBlob(designOutlineTargetLogoPreview);
     setDesignOutlineDialogContent(outlineContent);
     setDesignOutlineDialogMessageIndex(messageIndex);
-    setDesignOutlineLogoPreview(null);
+    setDesignOutlineMyLogoPreview(null);
+    setDesignOutlineTargetLogoPreview(null);
     setDesignOutlineExtracted(null);
     setDesignOutlineExtracting(false);
+    setDesignOutlineSavingBranding(false);
+    setDesignOutlineTab('logos');
     setDesignOutlineDialogOpen(true);
-    if (designOutlineLogoInputRef.current) designOutlineLogoInputRef.current.value = '';
+    if (designOutlineMyLogoInputRef.current) designOutlineMyLogoInputRef.current.value = '';
+    if (designOutlineTargetLogoInputRef.current) designOutlineTargetLogoInputRef.current.value = '';
+
+    // Load last-saved DB branding settings for reuse
+    const load = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/branding/logos`);
+        const data = await res.json();
+        if (!res.ok) return;
+        setDesignOutlineDbBranding(data);
+        const prefs = data.prefs || {};
+        if (prefs.myCorner) setDesignOutlineMyCorner(prefs.myCorner);
+        if (prefs.targetCorner) setDesignOutlineTargetCorner(prefs.targetCorner);
+        if (prefs.myWidthEmu) setDesignOutlineMyWidthEmu(prefs.myWidthEmu);
+        if (prefs.myHeightEmu) setDesignOutlineMyHeightEmu(prefs.myHeightEmu);
+        if (prefs.myMarginEmu) setDesignOutlineMyMarginEmu(prefs.myMarginEmu);
+        if (prefs.targetWidthEmu) setDesignOutlineTargetWidthEmu(prefs.targetWidthEmu);
+        if (prefs.targetHeightEmu) setDesignOutlineTargetHeightEmu(prefs.targetHeightEmu);
+        if (prefs.targetMarginEmu) setDesignOutlineTargetMarginEmu(prefs.targetMarginEmu);
+        const logos = Array.isArray(data.logos) ? data.logos : [];
+        const my = logos.find((l) => l.role === 'my' && l.smallDataUrl);
+        const tgt = logos.find((l) => l.role === 'target' && l.smallDataUrl);
+        if (my?.smallDataUrl) setDesignOutlineMyLogoPreview(my.smallDataUrl);
+        if (tgt?.smallDataUrl) setDesignOutlineTargetLogoPreview(tgt.smallDataUrl);
+      } catch (err) {
+        console.error('Failed to load branding:', err);
+      }
+    };
+    load();
   };
 
   const handleCloseDesignOutlineDialog = () => {
-    if (designOutlineLogoPreview) URL.revokeObjectURL(designOutlineLogoPreview);
+    const revokeIfBlob = (url) => {
+      if (typeof url === 'string' && url.startsWith('blob:')) URL.revokeObjectURL(url);
+    };
+    revokeIfBlob(designOutlineMyLogoPreview);
+    revokeIfBlob(designOutlineTargetLogoPreview);
     setDesignOutlineDialogOpen(false);
     setDesignOutlineDialogContent('');
     setDesignOutlineDialogMessageIndex(null);
-    setDesignOutlineLogoPreview(null);
+    setDesignOutlineMyLogoPreview(null);
+    setDesignOutlineTargetLogoPreview(null);
     setDesignOutlineExtracted(null);
     setDesignOutlineExtracting(false);
+    setDesignOutlineSavingBranding(false);
   };
 
-  const handleDesignOutlineLogoChange = (e) => {
+  const handleDesignOutlineLogoChange = (role, e) => {
     const file = e.target?.files?.[0];
     if (!file) return;
-    if (designOutlineLogoPreview) URL.revokeObjectURL(designOutlineLogoPreview);
-    setDesignOutlineExtracted(null);
-    const url = URL.createObjectURL(file);
-    setDesignOutlineLogoPreview(url);
-    setDesignOutlineExtracting(true);
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = async () => {
-      try {
-        const [dominant, palette] = await Promise.all([
-          getColor(img),
-          getPalette(img, { colorCount: 6 }),
-        ]);
-        setDesignOutlineExtracted({
-          dominant: { hex: dominant.hex() },
-          palette: (palette || []).map((c) => ({ hex: c.hex() })),
-        });
-      } catch (err) {
-        console.error('Color extraction failed:', err);
-        setDesignOutlineExtracted(null);
-      } finally {
-        setDesignOutlineExtracting(false);
-      }
-    };
-    img.onerror = () => {
-      setDesignOutlineExtracting(false);
+    if (role === 'my') {
+      if (designOutlineMyLogoPreview) URL.revokeObjectURL(designOutlineMyLogoPreview);
+      setDesignOutlineMyLogoPreview(URL.createObjectURL(file));
+      return;
+    }
+
+    if (role === 'target') {
+      if (designOutlineTargetLogoPreview) URL.revokeObjectURL(designOutlineTargetLogoPreview);
+      setDesignOutlineTargetLogoPreview(URL.createObjectURL(file));
+      // Extract palette from TARGET logo
       setDesignOutlineExtracted(null);
-    };
-    img.src = url;
+      setDesignOutlineExtracting(true);
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = async () => {
+        try {
+          const [dominant, palette] = await Promise.all([
+            getColor(img),
+            getPalette(img, { colorCount: 6 }),
+          ]);
+          setDesignOutlineExtracted({
+            dominant: { hex: dominant.hex() },
+            palette: (palette || []).map((c) => ({ hex: c.hex() })),
+          });
+        } catch (err) {
+          console.error('Color extraction failed:', err);
+          setDesignOutlineExtracted(null);
+        } finally {
+          setDesignOutlineExtracting(false);
+        }
+      };
+      img.onerror = () => {
+        setDesignOutlineExtracting(false);
+        setDesignOutlineExtracted(null);
+      };
+      img.src = URL.createObjectURL(file);
+    }
   };
 
-  const handleDesignOutlineConfirm = () => {
+  const saveBrandingLogosAndPrefs = async () => {
+    // Upload logos (if chosen) and save corner prefs in DB.
+    const uploads = [];
+    const myFile = designOutlineMyLogoInputRef.current?.files?.[0];
+    const targetFile = designOutlineTargetLogoInputRef.current?.files?.[0];
+
+    const uploadOne = async (role, file) => {
+      const form = new FormData();
+      form.append('role', role);
+      form.append('file', file);
+      const res = await fetch(`${API_BASE}/branding/logos`, { method: 'POST', body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Failed to upload ${role} logo`);
+      return data;
+    };
+
+    if (myFile) uploads.push(uploadOne('my', myFile));
+    if (targetFile) uploads.push(uploadOne('target', targetFile));
+    if (uploads.length) await Promise.all(uploads);
+
+    const prefsRes = await fetch(`${API_BASE}/branding/logo-prefs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        myCorner: designOutlineMyCorner,
+        targetCorner: designOutlineTargetCorner,
+        myWidthEmu: designOutlineMyWidthEmu,
+        myHeightEmu: designOutlineMyHeightEmu,
+        myMarginEmu: designOutlineMyMarginEmu,
+        targetWidthEmu: designOutlineTargetWidthEmu,
+        targetHeightEmu: designOutlineTargetHeightEmu,
+        targetMarginEmu: designOutlineTargetMarginEmu,
+      }),
+    });
+    const prefsData = await prefsRes.json().catch(() => ({}));
+    if (!prefsRes.ok) throw new Error(prefsData.detail || 'Failed to save logo corner preferences');
+
+    setLogoOverrides({
+      myCorner: designOutlineMyCorner,
+      targetCorner: designOutlineTargetCorner,
+      myWidthEmu: designOutlineMyWidthEmu,
+      myHeightEmu: designOutlineMyHeightEmu,
+      myMarginEmu: designOutlineMyMarginEmu,
+      targetWidthEmu: designOutlineTargetWidthEmu,
+      targetHeightEmu: designOutlineTargetHeightEmu,
+      targetMarginEmu: designOutlineTargetMarginEmu,
+    });
+  };
+
+  const handleDesignOutlineConfirm = async () => {
     const content = designOutlineDialogContent;
     const messageIndex = designOutlineDialogMessageIndex;
     const palette = designOutlineExtracted
@@ -723,6 +836,14 @@ function ChatPage() {
       : null;
     if (designOutlineExtracted?.dominant?.hex) {
       updateBrandingSettings({ brandColor: designOutlineExtracted.dominant.hex });
+    }
+    setDesignOutlineSavingBranding(true);
+    try {
+      await saveBrandingLogosAndPrefs();
+    } catch (err) {
+      alert(err.message || 'Failed to save logos/preferences');
+      setDesignOutlineSavingBranding(false);
+      return;
     }
     handleCloseDesignOutlineDialog();
     if (content != null && messageIndex != null) handleDesignOutline(content, messageIndex, palette);
@@ -834,6 +955,9 @@ function ChatPage() {
           documentContext: outlineContent,
           sessionId,
           documentId,
+          ...(buildMode === 'modify' && selectedFile && {
+            currentFile: { id: selectedFile.id, name: selectedFile.name, mimeType: selectedFile.mimeType },
+          }),
           ...(colorPalette && {
             colorPalette: {
               dominant: colorPalette.dominant,
@@ -1003,6 +1127,7 @@ function ChatPage() {
           sessionId,
           modifyExisting: buildMode === 'modify',
           currentFile: selectedFile ? { id: selectedFile.id, name: selectedFile.name, mimeType: selectedFile.mimeType } : null,
+          ...(logoOverrides && { logoOverrides }),
           ...(settingsEnabled && {
             designSettings: {
               style: designSettings.style,
@@ -1070,6 +1195,9 @@ function ChatPage() {
             topic: text,
             sessionId,
             documentId,
+            ...(buildMode === 'modify' && selectedFile && {
+              currentFile: { id: selectedFile.id, name: selectedFile.name, mimeType: selectedFile.mimeType },
+            }),
             ...(settingsEnabled && {
               designSettings: {
                 style: designSettings.style,
@@ -1947,32 +2075,121 @@ function ChatPage() {
               </button>
             </div>
             <div className="settings-dialog-body">
+              <div className="settings-tabs design-outline-tabs">
+                <button
+                  type="button"
+                  className={`settings-tab ${designOutlineTab === 'logos' ? 'active' : ''}`}
+                  onClick={() => setDesignOutlineTab('logos')}
+                >
+                  Logos
+                </button>
+                <button
+                  type="button"
+                  className={`settings-tab ${designOutlineTab === 'advanced' ? 'active' : ''}`}
+                  onClick={() => setDesignOutlineTab('advanced')}
+                >
+                  Advanced
+                </button>
+              </div>
+              {designOutlineTab === 'logos' && (
+                <>
               <p className="design-outline-dialog-desc">
-                Optional: upload a logo to extract a color scheme for your presentation.
+                Optional: upload up to two logos (your firm + target company) and choose corners. Logos are stored and reused.
               </p>
+              {designOutlineDbBranding?.logos?.length > 0 && (
+                <div className="design-outline-branding-saved">
+                  <div className="design-outline-color-label">Saved branding (from DB)</div>
+                  <div className="design-outline-saved-logos">
+                    {designOutlineDbBranding.logos.map((l) => (
+                      <div key={l.role} className="design-outline-saved-logo">
+                        <div className="design-outline-saved-logo-title">
+                          {l.role === 'my' ? 'Your logo' : 'Target logo'}
+                        </div>
+                        {l.smallDataUrl ? (
+                          <img className="design-outline-logo-preview" src={l.smallDataUrl} alt={`${l.role} logo`} />
+                        ) : (
+                          <div className="design-outline-saved-logo-missing">No logo stored</div>
+                        )}
+                        <div className="design-outline-saved-logo-meta">{l.filename || ''}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="settings-field">
-                <label htmlFor="design-outline-logo-upload" className="settings-toggle-label">
-                  Logo image
+                <label htmlFor="design-outline-my-logo-upload" className="settings-toggle-label">
+                  Your company logo
                 </label>
                 <div className="design-outline-upload-row">
                   <input
-                    ref={designOutlineLogoInputRef}
-                    id="design-outline-logo-upload"
+                    ref={designOutlineMyLogoInputRef}
+                    id="design-outline-my-logo-upload"
                     type="file"
                     accept="image/*"
                     className="input-file-hidden"
-                    onChange={handleDesignOutlineLogoChange}
+                    onChange={(e) => handleDesignOutlineLogoChange('my', e)}
                   />
-                  <label htmlFor="design-outline-logo-upload" className="settings-upload-btn">
+                  <label htmlFor="design-outline-my-logo-upload" className="settings-upload-btn">
                     Choose image
                   </label>
-                  {designOutlineLogoPreview && (
+                  {designOutlineMyLogoPreview && (
                     <img
-                      src={designOutlineLogoPreview}
+                      src={designOutlineMyLogoPreview}
                       alt="Logo preview"
                       className="design-outline-logo-preview"
                     />
                   )}
+                </div>
+                <div className="design-outline-corner-row">
+                  <span className="design-outline-corner-label">Corner</span>
+                  <select
+                    className="settings-select design-outline-corner-select"
+                    value={designOutlineMyCorner}
+                    onChange={(e) => setDesignOutlineMyCorner(e.target.value)}
+                  >
+                    <option value="top_left">Top left</option>
+                    <option value="top_right">Top right</option>
+                    <option value="bottom_left">Bottom left</option>
+                    <option value="bottom_right">Bottom right</option>
+                  </select>
+                </div>
+              </div>
+              <div className="settings-field">
+                <label htmlFor="design-outline-target-logo-upload" className="settings-toggle-label">
+                  Target company logo
+                </label>
+                <div className="design-outline-upload-row">
+                  <input
+                    ref={designOutlineTargetLogoInputRef}
+                    id="design-outline-target-logo-upload"
+                    type="file"
+                    accept="image/*"
+                    className="input-file-hidden"
+                    onChange={(e) => handleDesignOutlineLogoChange('target', e)}
+                  />
+                  <label htmlFor="design-outline-target-logo-upload" className="settings-upload-btn">
+                    Choose image
+                  </label>
+                  {designOutlineTargetLogoPreview && (
+                    <img
+                      src={designOutlineTargetLogoPreview}
+                      alt="Target logo preview"
+                      className="design-outline-logo-preview"
+                    />
+                  )}
+                </div>
+                <div className="design-outline-corner-row">
+                  <span className="design-outline-corner-label">Corner</span>
+                  <select
+                    className="settings-select design-outline-corner-select"
+                    value={designOutlineTargetCorner}
+                    onChange={(e) => setDesignOutlineTargetCorner(e.target.value)}
+                  >
+                    <option value="top_left">Top left</option>
+                    <option value="top_right">Top right</option>
+                    <option value="bottom_left">Bottom left</option>
+                    <option value="bottom_right">Bottom right</option>
+                  </select>
                 </div>
               </div>
               {designOutlineExtracting && (
@@ -2011,19 +2228,96 @@ function ChatPage() {
                   </div>
                 </div>
               )}
+                </>
+              )}
+              {designOutlineTab === 'advanced' && (
+                <div className="design-outline-advanced">
+                  <p className="design-outline-dialog-desc">
+                    These settings control deterministic placement. Units are EMU (Slides internal units).
+                    Defaults: width=600000, height=600000, margin=250000.
+                  </p>
+                  <div className="design-outline-advanced-grid">
+                    <div className="design-outline-advanced-card">
+                      <div className="design-outline-color-label">Your logo</div>
+                      <div className="design-outline-advanced-row">
+                        <label className="design-outline-advanced-label">Width (EMU)</label>
+                        <input className="settings-input" type="number" value={designOutlineMyWidthEmu} onChange={(e) => setDesignOutlineMyWidthEmu(Number(e.target.value))} />
+                      </div>
+                      <div className="design-outline-advanced-row">
+                        <label className="design-outline-advanced-label">Height (EMU)</label>
+                        <input className="settings-input" type="number" value={designOutlineMyHeightEmu} onChange={(e) => setDesignOutlineMyHeightEmu(Number(e.target.value))} />
+                      </div>
+                      <div className="design-outline-advanced-row">
+                        <label className="design-outline-advanced-label">Margin (EMU)</label>
+                        <input className="settings-input" type="number" value={designOutlineMyMarginEmu} onChange={(e) => setDesignOutlineMyMarginEmu(Number(e.target.value))} />
+                      </div>
+                    </div>
+                    <div className="design-outline-advanced-card">
+                      <div className="design-outline-color-label">Target logo</div>
+                      <div className="design-outline-advanced-row">
+                        <label className="design-outline-advanced-label">Width (EMU)</label>
+                        <input className="settings-input" type="number" value={designOutlineTargetWidthEmu} onChange={(e) => setDesignOutlineTargetWidthEmu(Number(e.target.value))} />
+                      </div>
+                      <div className="design-outline-advanced-row">
+                        <label className="design-outline-advanced-label">Height (EMU)</label>
+                        <input className="settings-input" type="number" value={designOutlineTargetHeightEmu} onChange={(e) => setDesignOutlineTargetHeightEmu(Number(e.target.value))} />
+                      </div>
+                      <div className="design-outline-advanced-row">
+                        <label className="design-outline-advanced-label">Margin (EMU)</label>
+                        <input className="settings-input" type="number" value={designOutlineTargetMarginEmu} onChange={(e) => setDesignOutlineTargetMarginEmu(Number(e.target.value))} />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="design-outline-advanced-actions">
+                    <button
+                      type="button"
+                      className="edit-outline-cancel-btn"
+                      onClick={() => {
+                        setDesignOutlineMyWidthEmu(600000);
+                        setDesignOutlineMyHeightEmu(600000);
+                        setDesignOutlineMyMarginEmu(250000);
+                        setDesignOutlineTargetWidthEmu(600000);
+                        setDesignOutlineTargetHeightEmu(600000);
+                        setDesignOutlineTargetMarginEmu(250000);
+                      }}
+                    >
+                      Restore defaults
+                    </button>
+                    <button
+                      type="button"
+                      className="settings-upload-btn"
+                      onClick={async () => {
+                        setDesignOutlineSavingBranding(true);
+                        try {
+                          await saveBrandingLogosAndPrefs();
+                        } catch (err) {
+                          alert(err.message || 'Failed to save settings');
+                        } finally {
+                          setDesignOutlineSavingBranding(false);
+                        }
+                      }}
+                      disabled={designOutlineSavingBranding}
+                    >
+                      {designOutlineSavingBranding ? 'Saving…' : 'Save settings'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="settings-dialog-footer">
               <button
                 type="button"
                 className="settings-upload-btn"
                 onClick={handleDesignOutlineConfirm}
+                disabled={designOutlineSavingBranding}
               >
-                {designOutlineExtracted ? 'Design with these colors' : 'Design'}
+                {designOutlineSavingBranding ? 'Saving…' : (designOutlineExtracted ? 'Design with these colors' : 'Design')}
               </button>
               <button
                 type="button"
                 className="edit-outline-cancel-btn"
                 onClick={handleCloseDesignOutlineDialog}
+                disabled={designOutlineSavingBranding}
               >
                 Cancel
               </button>

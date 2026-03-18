@@ -110,3 +110,49 @@ def init_db():
             conn.commit()
         except Exception:
             pass  # column may already exist
+
+    # Branding logos tables (for deterministic logo placement)
+    with engine.connect() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS branding_logos (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              role TEXT NOT NULL UNIQUE CHECK (role IN ('my', 'target')),
+              filename TEXT,
+              content_type TEXT,
+              png_bytes BLOB,
+              small_data_url TEXT,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS branding_logo_prefs (
+              id INTEGER PRIMARY KEY CHECK (id = 1),
+              my_corner TEXT,
+              target_corner TEXT,
+              my_width_emu INTEGER,
+              my_height_emu INTEGER,
+              my_margin_emu INTEGER,
+              target_width_emu INTEGER,
+              target_height_emu INTEGER,
+              target_margin_emu INTEGER,
+              updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        conn.commit()
+
+    # Migrations: add sizing columns to branding_logo_prefs if missing
+    with engine.connect() as conn:
+        for col in (
+            "my_width_emu INTEGER",
+            "my_height_emu INTEGER",
+            "my_margin_emu INTEGER",
+            "target_width_emu INTEGER",
+            "target_height_emu INTEGER",
+            "target_margin_emu INTEGER",
+        ):
+            try:
+                conn.execute(text(f"ALTER TABLE branding_logo_prefs ADD COLUMN {col}"))
+                conn.commit()
+            except Exception:
+                pass

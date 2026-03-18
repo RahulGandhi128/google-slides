@@ -113,7 +113,23 @@ TOOL_DECLARATIONS = [
                         "charts_color": {"type": "string"},
                     },
                 },
-                "logoUrl": {"type": "string", "description": "Optional logo image URL (or data URL) to place on every slide"},
+                "logoUrl": {"type": "string", "description": "Optional logo image URL (or data URL) to place on every slide (legacy single-logo mode)"},
+                "logos": {
+                    "type": "array",
+                    "description": "Optional array of logo objects to place on every slide deterministically.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "url": {"type": "string", "description": "Logo image URL or data URL"},
+                            "corner": {"type": "string", "description": "top_left | top_right | bottom_left | bottom_right"},
+                            "idPrefix": {"type": "string", "description": "ObjectId prefix (e.g. logo_my, logo_target)"},
+                            "widthEmu": {"type": "integer"},
+                            "heightEmu": {"type": "integer"},
+                            "marginEmu": {"type": "integer"},
+                        },
+                        "required": ["url"],
+                    },
+                },
             },
             "required": ["title", "numSlides"],
         },
@@ -384,6 +400,7 @@ def _execute_tool(name: str, args: dict) -> str:
                 num_slides=args.get("numSlides", 1),
                 theme_colors=args.get("themeColors") or {},
                 logo_url=args.get("logoUrl"),
+                logos=args.get("logos") or None,
             )
         else:
             return f"Unknown tool: {name}"

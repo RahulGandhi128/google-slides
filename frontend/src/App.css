@@ -706,6 +706,12 @@
   border-color: rgba(22, 163, 74, 0.15);
 }
 
+.message-mode-sheets.message-user,
+.message-mode-sheets.message-assistant {
+  background: rgba(99, 102, 241, 0.06);
+  border-color: rgba(99, 102, 241, 0.15);
+}
+
 .message-avatar {
   flex-shrink: 0;
 }
@@ -739,6 +745,10 @@
   background: linear-gradient(135deg, #16a34a, #15803d);
 }
 
+.message-mode-sheets .avatar-icon.assistant {
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+}
+
 .message-mode-label {
   display: inline-flex;
   align-items: center;
@@ -760,6 +770,10 @@
 
 .message-mode-label-research {
   color: #15803d;
+}
+
+.message-mode-label-sheets {
+  color: #4f46e5;
 }
 
 .message-content {
@@ -1978,6 +1992,87 @@
 }
 
 /* Design outline dialog (logo + Color Thief) */
+.design-outline-dialog {
+  max-width: 720px;
+}
+
+.design-outline-tabs {
+  padding: 0;
+  margin: -0.25rem 0 1rem;
+}
+
+.design-outline-branding-saved {
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  margin-bottom: 1rem;
+}
+
+.design-outline-saved-logos {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.design-outline-saved-logo {
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+}
+
+.design-outline-saved-logo-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.4rem;
+}
+
+.design-outline-saved-logo-meta {
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+
+.design-outline-saved-logo-missing {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.design-outline-advanced-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.design-outline-advanced-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem;
+  background: var(--bg-secondary);
+}
+
+.design-outline-advanced-row {
+  margin-top: 0.6rem;
+}
+
+.design-outline-advanced-label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.25rem;
+}
+
+.design-outline-advanced-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
 .design-outline-dialog .design-outline-dialog-desc {
   margin: 0 0 1rem;
   font-size: 0.9rem;
@@ -1999,6 +2094,23 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-secondary);
+}
+
+.design-outline-corner-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.design-outline-corner-label {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  min-width: 52px;
+}
+
+.design-outline-corner-select {
+  max-width: 180px;
 }
 
 .design-outline-extracting {

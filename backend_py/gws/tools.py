@@ -133,6 +133,7 @@ def scaffold_presentation(
     num_slides: int,
     theme_colors: dict | None = None,
     logo_url: str | None = None,
+    logos: list[dict] | None = None,
 ) -> dict:
     """
     Create a new presentation with a global theme color scheme + N slides scaffolded.
@@ -171,6 +172,16 @@ def scaffold_presentation(
 
     requests: list[dict] = []
 
+    def _batch_update_chunks(reqs: list[dict], chunk_size: int) -> None:
+        """Send batchUpdate in smaller chunks to avoid Windows command-line length limits."""
+        if not reqs:
+            return
+        chunk_size = int(chunk_size or 0)
+        if chunk_size <= 0:
+            chunk_size = 25
+        for i in range(0, len(reqs), chunk_size):
+            presentations_batch_update(presentation_id, reqs[i : i + chunk_size])
+
     # 1) Update the master color scheme (global theme colors).
     scheme = _make_color_scheme(theme_colors)
     if master_id and scheme:
@@ -184,12 +195,13 @@ def scaffold_presentation(
             }
         )
 
-    # 2) Create truly blank slides (no layout placeholders) and delete the default first slide.
+    # 2) Create truly blank slides (no layout placeholders).
     # We'll create slide_1..slide_N with predefinedLayout BLANK, then remove the auto-created slide.
     scaffold = []
+    create_reqs = []
     for idx in range(1, num_slides + 1):
         slide_id = f"slide_{idx}"
-        requests.append(
+        create_reqs.append(
             {
                 "createSlide": {
                     "objectId": slide_id,
@@ -200,8 +212,12 @@ def scaffold_presentation(
         )
         scaffold.append({"pageObjectId": slide_id, "titleObjectId": None, "bodyObjectId": None})
 
+    # Execute: master scheme (small) + create slides (chunked)
+    _batch_update_chunks(requests, chunk_size=10)
+    _batch_update_chunks(create_reqs, chunk_size=25)
+
     # Remove the default slide so the deck contains only our blank scaffold slides.
-    requests.append({"deleteObject": {"objectId": first_slide_id}})
+    _batch_update_chunks([{"deleteObject": {"objectId": first_slide_id}}], chunk_size=1)
 
     # 3) Apply background color per slide (helps even if master scheme isn't applied everywhere).
     bg_hex = None
@@ -209,8 +225,9 @@ def scaffold_presentation(
         bg_hex = theme_colors.get("background_color")
     if bg_hex:
         rgb = _hex_to_rgb_floats(bg_hex)
+        bg_reqs = []
         for s in scaffold:
-            requests.append(
+            bg_reqs.append(
                 {
                     "updatePageProperties": {
                         "objectId": s["pageObjectId"],
@@ -223,40 +240,70 @@ def scaffold_presentation(
                     }
                 }
             )
+        _batch_update_chunks(bg_reqs, chunk_size=25)
 
-    # 4) Add logo image to every slide if provided.
+    # 4) Add logo image(s) to every slide if provided.
+    # Slide size in EMU (16:9): width≈9144000, height≈6858000.
+    SLIDE_W = 9144000
+    SLIDE_H = 6858000
+
+    def _corner_xy(corner: str, w: int, h: int, margin: int) -> tuple[int, int]:
+        corner = (corner or "top_right").strip().lower()
+        if corner == "top_left":
+            return margin, margin
+        if corner == "top_right":
+            return SLIDE_W - w - margin, margin
+        if corner == "bottom_left":
+            return margin, SLIDE_H - h - margin
+        if corner == "bottom_right":
+            return SLIDE_W - w - margin, SLIDE_H - h - margin
+        # default
+        return SLIDE_W - w - margin, margin
+
+    logo_items: list[dict] = []
+    # Backward compat: single logo_url -> one logo at top-right
     if logo_url:
-        # Small logo, top-right. Adjust sizes as needed.
-        w = 600000  # EMU
-        h = 600000
-        tx = 9144000 - w - 250000
-        ty = 250000
-        for i, s in enumerate(scaffold, start=1):
-            requests.append(
-                {
-                    "createImage": {
-                        "objectId": f"logo_{i}",
-                        "url": logo_url,
-                        "elementProperties": {
-                            "pageObjectId": s["pageObjectId"],
-                            "size": {
-                                "width": {"magnitude": w, "unit": "EMU"},
-                                "height": {"magnitude": h, "unit": "EMU"},
-                            },
-                            "transform": {
-                                "scaleX": 1,
-                                "scaleY": 1,
-                                "translateX": int(tx),
-                                "translateY": int(ty),
-                                "unit": "EMU",
-                            },
-                        },
-                    }
-                }
-            )
+        logo_items.append({"url": logo_url, "corner": "top_right", "idPrefix": "logo"})
+    if isinstance(logos, list):
+        for it in logos:
+            if isinstance(it, dict) and it.get("url"):
+                logo_items.append(it)
 
-    if requests:
-        presentations_batch_update(presentation_id, requests)
+    if logo_items:
+        # Logos can make payloads large; send in small chunks. Also split per-logo to keep chunks small.
+        for it in logo_items:
+            url = it.get("url")
+            corner = it.get("corner") or "top_right"
+            w = int(it.get("widthEmu") or 600000)
+            h = int(it.get("heightEmu") or 600000)
+            margin = int(it.get("marginEmu") or 250000)
+            prefix = (it.get("idPrefix") or "logo").strip() or "logo"
+            tx, ty = _corner_xy(corner, w, h, margin)
+            logo_reqs = []
+            for i, s in enumerate(scaffold, start=1):
+                logo_reqs.append(
+                    {
+                        "createImage": {
+                            "objectId": f"{prefix}_{i}",
+                            "url": url,
+                            "elementProperties": {
+                                "pageObjectId": s["pageObjectId"],
+                                "size": {
+                                    "width": {"magnitude": w, "unit": "EMU"},
+                                    "height": {"magnitude": h, "unit": "EMU"},
+                                },
+                                "transform": {
+                                    "scaleX": 1,
+                                    "scaleY": 1,
+                                    "translateX": int(tx),
+                                    "translateY": int(ty),
+                                    "unit": "EMU",
+                                },
+                            },
+                        }
+                    }
+                )
+            _batch_update_chunks(logo_reqs, chunk_size=10)
 
     return {
         "presentationId": presentation_id,

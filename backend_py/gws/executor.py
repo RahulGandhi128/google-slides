@@ -6,7 +6,11 @@ import os
 import platform
 import shutil
 import subprocess
+import logging
+import textwrap
 from pathlib import Path
+
+log = logging.getLogger("gws.executor")
 
 
 def _get_gws_cmd() -> list[str]:
@@ -37,6 +41,21 @@ def run_gws(args: list[str], params: dict | None = None, json_body: dict | None 
     env = os.environ.copy()
     env["GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND"] = "file"
 
+    # Log the exact command so we can debug "unrecognized subcommand" and other CLI issues.
+    # Keep payload logs truncated to avoid huge output in terminals.
+    try:
+        params_preview = textwrap.shorten(json.dumps(params, default=str), width=800) if params is not None else None
+        json_preview = textwrap.shorten(json.dumps(json_body, default=str), width=800) if json_body is not None else None
+    except Exception:
+        params_preview = None
+        json_preview = None
+
+    log.info("Running gws: %s %s", base, all_args)
+    if params_preview:
+        log.info("gws --params preview: %s", params_preview)
+    if json_preview:
+        log.info("gws --json preview: %s", json_preview)
+
     result = subprocess.run(
         base + all_args,
         env=env,
@@ -50,15 +69,30 @@ def run_gws(args: list[str], params: dict | None = None, json_body: dict | None 
 
     stdout = result.stdout.strip()
     if result.returncode != 0:
-        err = stdout
-        if err.startswith("{"):
+        err_stdout = stdout
+        err_stderr = (result.stderr or "").strip()
+
+        # Log both streams for maximum debuggability.
+        log.error(
+            "gws failed rc=%s. stdout=%s stderr=%s",
+            result.returncode,
+            textwrap.shorten(err_stdout, width=1200),
+            textwrap.shorten(err_stderr, width=1200),
+        )
+
+        err = err_stdout
+        if err_stdout.startswith("{"):
             try:
-                data = json.loads(err)
+                data = json.loads(err_stdout)
                 msg = data.get("error", {}).get("message", err)
             except json.JSONDecodeError:
-                msg = result.stderr or err
+                msg = err_stderr or err_stdout
         else:
-            msg = result.stderr or err
+            msg = err_stderr or err_stdout
+
+        # Make sure the raised error includes the stderr snippet (this is where CLI subcommand errors usually are).
+        if err_stderr and err_stderr not in msg:
+            msg = f"{msg}\n\n[stderr]\n{err_stderr}"
         raise RuntimeError(msg)
 
     if not stdout:

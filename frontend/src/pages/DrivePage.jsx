@@ -74,7 +74,8 @@ function DrivePage() {
         <div className="drive-header-content">
           <span className="drive-logo">G</span>
           <h1>Google Drive</h1>
-          <Link to="/chat" className="chat-link">Open Assistant</Link>
+          <Link to="/chat" className="chat-link">Open Slides Assistant</Link>
+          <Link to="/sheets-chat" className="chat-link">Open Sheets Assistant</Link>
         </div>
       </header>
 

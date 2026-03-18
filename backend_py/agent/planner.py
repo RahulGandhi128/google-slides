@@ -55,7 +55,20 @@ WHEN PRODUCING A PLAN:
 - Your job is slide design only: define title, slides, layout, text content, and element positions. Do not generate images, fetch URLs, or do anything beyond describing what goes on each slide.
 - Where a slide needs a picture or visual, leave a reserved space by adding an "image" element with left, top, width, height, and image_description. The builder will fill that space later; you only reserve the slot and describe what should go there.
 
-Slide dimensions: 960 points wide × 540 points tall (16:9). All positions and sizes are in points (1 inch = 72 points).
+UNITS & PAGE SIZE (IMPORTANT):
+- The executor uses Google Slides API which positions/sizes page elements in EMU.
+- Official conversion: 1 inch = 914,400 EMU and 1 point (pt) = 12,700 EMU.
+- Font size is specified in points (PT) in updateTextStyle, but text box geometry is EMU.
+- Use the page size provided in [[PAGE SIZE]] when present. If not provided, assume widescreen 16:9:
+  - pageWidthEmu = 9,144,000 (10 in)
+  - pageHeightEmu = 5,143,500 (5.625 in)
+- Use a safe margin of at least 457,200 EMU (0.5 in) on all sides unless [[PAGE SIZE]] specifies otherwise.
+
+TEXT FIT HEURISTICS (approximate, for planning only):
+- Approx line height: lineHeightPt ≈ 1.2 × font_size_pt.
+- Convert to EMU: lineHeightEmu ≈ lineHeightPt × 12,700.
+- For 14pt bullets: lineHeightEmu ≈ 14 × 1.2 × 12,700 ≈ 213,360 EMU per line.
+- Keep bullet count such that (numLines × lineHeightEmu) fits within height_emu minus ~1 line of padding.
 
 JSON structure (output only this, nothing else):
 {
@@ -68,10 +81,10 @@ JSON structure (output only this, nothing else):
       "details": "Concrete instructions: exact title text, subtitle, bullet points, icon placement, colors. What should appear on this slide.",
       "content": "Main body text or bullet points. Use actual newline characters between lines (each line becomes one bullet). Copy from document verbatim. Do not use escaped backslash-n.",
       "elements": [
-        { "type": "text_box", "left": 72, "top": 80, "width": 816, "height": 56, "content": "Title text here", "font_size": 24 },
-        { "type": "text_box", "left": 72, "top": 160, "width": 816, "height": 320, "content": "Body or bullets - one line per bullet", "font_size": 14 },
-        { "type": "icon", "left": 872, "top": 40, "width": 48, "height": 48, "query": "chart" },
-        { "type": "image", "left": 600, "top": 180, "width": 320, "height": 200, "image_description": "Placeholder: hero image (space reserved)" }
+        { "type": "text_box", "left_emu": 685800, "top_emu": 1016000, "width_emu": 7772400, "height_emu": 711200, "content": "Title text here", "font_size": 24 },
+        { "type": "text_box", "left_emu": 685800, "top_emu": 2032000, "width_emu": 7772400, "height_emu": 4064000, "content": "Body or bullets - one line per bullet", "font_size": 14 },
+        { "type": "icon", "left_emu": 8128000, "top_emu": 508000, "width_emu": 609600, "height_emu": 609600, "query": "chart" },
+        { "type": "image", "left_emu": 7620000, "top_emu": 2286000, "width_emu": 1524000, "height_emu": 1016000, "image_description": "Placeholder: hero image (space reserved)" }
       ]
     }
   ],
@@ -93,19 +106,36 @@ JSON structure (output only this, nothing else):
 You MUST include "theme_colors" in aesthetics with all six keys: heading_color, body_text_color, background_color, accent_color, shapes_color, charts_color. Use hex values (e.g. "#1a1a2e"). When a color palette is provided in the request, use those colors to fill theme_colors (dominant for headings/accents, palette entries for shapes/charts/background as appropriate). Otherwise choose a coherent theme and set all six.
 
 Element types:
-- text_box: left, top, width, height (numbers), content (string). Optional: font_size (number). Use font_size 24 or 28 for titles, 14 or 16 for body—consistently.
-- icon: left, top, width, height, query (e.g. "chart", "people"). Add only where an icon adds value.
-- image: left, top, width, height, image_description (string). Use to reserve space for an image; describe what should go there. Do not generate or fetch images—only leave the slot.
-- shape: left, top, width, height, shape_type (e.g. "rectangle"), optional fill.
+- text_box: left_emu, top_emu, width_emu, height_emu (numbers), content (string). Optional: font_size (number, PT). Use font_size 24 or 28 for titles, 14 or 16 for body—consistently.
+- icon: left_emu, top_emu, width_emu, height_emu, query (e.g. "chart", "people"). Add only where an icon adds value.
+- image: left_emu, top_emu, width_emu, height_emu, image_description (string). Use to reserve space for an image; describe what should go there. Do not generate or fetch images—only leave the slot.
+- shape: left_emu, top_emu, width_emu, height_emu, shape_type (e.g. "rectangle"), optional fill.
 
 Requirements:
 - For each slide: "layout", "details", "content", and "elements" with exact coordinates.
 - Content must be copied from the document verbatim; do not rewrite.
 - Where a slide needs a visual, add one image element with image_description; the plan only reserves space.
-- Coordinates within 0–960 (width) and 0–540 (height). Margins: left ≥ 72, right ≤ 888.
+- Coordinates MUST be given in EMU fields: left_emu, top_emu, width_emu, height_emu.
+- STRICT BOUNDS: for every element, enforce:
+  - left_emu ≥ margin_emu, top_emu ≥ margin_emu
+  - left_emu + width_emu ≤ pageWidthEmu - margin_emu
+  - top_emu + height_emu ≤ pageHeightEmu - margin_emu
 - Order elements: background shape first, then text, then icons, then image placeholders.
 - Include theme and theme_colors (all six keys) in aesthetics.
 - Output only the JSON object, no other text before or after."""
+
+
+def _page_size_prompt_addon(page_size_emu: dict | None) -> str:
+    if not page_size_emu:
+        return (
+            "\n\n[[PAGE SIZE]] Assume widescreen 16:9: pageWidthEmu=9144000, pageHeightEmu=5143500, margin_emu=457200."
+        )
+    w = page_size_emu.get("pageWidthEmu")
+    h = page_size_emu.get("pageHeightEmu")
+    m = page_size_emu.get("marginEmu", 457200)
+    if not w or not h:
+        return ""
+    return f"\n\n[[PAGE SIZE]] pageWidthEmu={int(w)}, pageHeightEmu={int(h)}, margin_emu={int(m)}. Enforce strict bounds for all elements."
 
 
 def _design_prompt_addon(design_settings: dict | None) -> str:
@@ -159,6 +189,7 @@ def generate_plan(
     document_context: str | None = None,
     design_settings: dict | None = None,
     color_palette: dict | None = None,
+    page_size_emu: dict | None = None,
 ) -> tuple[dict[str, Any] | None, str]:
     """
     Run the planner LLM. Returns (plan, text). Plan is non-None only when the user
@@ -180,6 +211,7 @@ def generate_plan(
         prompt = f"User request:\n\n{topic}"
     prompt += _design_prompt_addon(design_settings)
     prompt += _color_palette_prompt_addon(color_palette)
+    prompt += _page_size_prompt_addon(page_size_emu)
 
     logger.info("Planner: generating for topic=%r", topic[:80])
 
