@@ -403,6 +403,34 @@
   background: rgba(0,0,0,0.25);
 }
 
+/* Sheets assistant: invisible scrollbars (like Slides sidebar chat-history-list) */
+.sheets-chat-page .chat-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.sheets-chat-page .chat-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.sheets-chat-page .chat-sidebar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.sheets-chat-page .chat-sidebar::-webkit-scrollbar {
+  display: none;
+}
+
+.sheets-chat-page .chat-sidebar-file-list {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.sheets-chat-page .chat-sidebar-file-list::-webkit-scrollbar {
+  display: none;
+}
+
 .mode-tabs-bar {
   position: sticky;
   top: 0;
@@ -706,12 +734,6 @@
   border-color: rgba(22, 163, 74, 0.15);
 }
 
-.message-mode-sheets.message-user,
-.message-mode-sheets.message-assistant {
-  background: rgba(99, 102, 241, 0.06);
-  border-color: rgba(99, 102, 241, 0.15);
-}
-
 .message-avatar {
   flex-shrink: 0;
 }
@@ -745,10 +767,6 @@
   background: linear-gradient(135deg, #16a34a, #15803d);
 }
 
-.message-mode-sheets .avatar-icon.assistant {
-  background: linear-gradient(135deg, #6366f1, #4f46e5);
-}
-
 .message-mode-label {
   display: inline-flex;
   align-items: center;
@@ -770,10 +788,6 @@
 
 .message-mode-label-research {
   color: #15803d;
-}
-
-.message-mode-label-sheets {
-  color: #4f46e5;
 }
 
 .message-content {
@@ -2073,6 +2087,14 @@
   gap: 0.5rem;
   margin-top: 1rem;
 }
+.design-outline-add-logos-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
 .design-outline-dialog .design-outline-dialog-desc {
   margin: 0 0 1rem;
   font-size: 0.9rem;
@@ -2087,6 +2109,23 @@
   flex-wrap: wrap;
 }
 
+.design-outline-or {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.design-outline-url-input {
+  flex: 1;
+  min-width: 160px;
+}
+
+.design-outline-preview-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+}
+
 .design-outline-logo-preview {
   width: 56px;
   height: 56px;
@@ -2094,6 +2133,23 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-secondary);
+}
+
+.design-outline-clear-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  line-height: 1;
+  font-size: 1rem;
+}
+
+.design-outline-clear-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
 }
 
 .design-outline-corner-row {

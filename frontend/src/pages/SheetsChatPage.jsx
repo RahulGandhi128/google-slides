@@ -1,6 +1,6 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 
 import '../App.css';
 
@@ -26,13 +26,141 @@ function SheetsMessageBubble({ message, isUser }) {
 export default function SheetsChatPage() {
   const [sessionId, setSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
-  const [spreadsheetId, setSpreadsheetId] = useState('');
+  const [selectedSheet, setSelectedSheet] = useState(null);
+  const [driveFiles, setDriveFiles] = useState([]);
+  const [driveFilesLoading, setDriveFilesLoading] = useState(false);
+  const [chatSessions, setChatSessions] = useState([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionMenuOpen, setSessionMenuOpen] = useState(null);
+  const [deletingSessionId, setDeletingSessionId] = useState(null);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
+  const [searchParams, setSearchParams] = useSearchParams();
   const inputRef = useRef(null);
+  const sessionMenuRef = useRef(null);
+
+  const spreadsheetId = selectedSheet?.id ?? '';
 
   const sendEnabled = useMemo(() => input.trim().length > 0 && !isLoading, [input, isLoading]);
+
+  const fetchDriveFiles = async () => {
+    setDriveFilesLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/drive/files?page_size=50`);
+      const data = await res.json();
+      if (res.ok && data.files) {
+        setDriveFiles(data.files.filter((f) => (f.mimeType || '').includes('spreadsheet')));
+      }
+    } catch (err) {
+      console.error('Failed to fetch drive files:', err);
+    } finally {
+      setDriveFilesLoading(false);
+    }
+  };
+
+  const selectSheet = (file) => {
+    const isSheet = (file.mimeType || '').includes('spreadsheet');
+    if (!isSheet) return;
+    setSelectedSheet({ id: file.id, name: file.name, mimeType: file.mimeType || '' });
+    setSearchParams({ fileId: file.id, fileName: file.name, mimeType: file.mimeType || '' }, { replace: true });
+  };
+
+  const clearSheet = () => {
+    setSelectedSheet(null);
+    setSearchParams({}, { replace: true });
+  };
+
+  const fetchChatSessions = async () => {
+    setSessionsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/chat/sessions?mode=sheets`);
+      const data = await res.json();
+      if (res.ok && data.sessions) {
+        setChatSessions(data.sessions);
+      }
+    } catch (err) {
+      console.error('Failed to fetch chat sessions:', err);
+    } finally {
+      setSessionsLoading(false);
+    }
+  };
+
+  const loadSession = async (id) => {
+    try {
+      const res = await fetch(`${API_BASE}/chat/sessions/${id}`);
+      const data = await res.json();
+      if (res.ok && data.messages) {
+        setSessionId(data.id);
+        setMessages(
+          data.messages.map((m) => ({
+            role: m.role,
+            content: m.content,
+            mode: m.mode || 'sheets',
+          }))
+        );
+      }
+    } catch (err) {
+      console.error('Failed to load session:', err);
+    }
+  };
+
+  const startNewChat = () => {
+    setSessionId(null);
+    setMessages([]);
+    setSessionMenuOpen(null);
+    fetchChatSessions();
+  };
+
+  const handleDeleteSession = async (sessionIdToDelete, e) => {
+    e?.stopPropagation?.();
+    if (deletingSessionId || !sessionIdToDelete) return;
+    setDeletingSessionId(sessionIdToDelete);
+    setSessionMenuOpen(null);
+    try {
+      const res = await fetch(`${API_BASE}/chat/sessions/${sessionIdToDelete}`, { method: 'DELETE' });
+      if (res.ok) {
+        fetchChatSessions();
+        if (sessionId === sessionIdToDelete) {
+          setSessionId(null);
+          setMessages([]);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to delete session:', err);
+    } finally {
+      setDeletingSessionId(null);
+    }
+  };
+
+  useEffect(() => {
+    fetchDriveFiles();
+    fetchChatSessions();
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (e.target?.closest?.('.chat-history-dots')) return;
+      if (sessionMenuRef.current && !sessionMenuRef.current.contains(e.target)) {
+        setSessionMenuOpen(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  useEffect(() => {
+    const fileId = searchParams.get('fileId');
+    const fileName = searchParams.get('fileName');
+    const mimeType = searchParams.get('mimeType') || '';
+    if (fileId && fileName) {
+      setSelectedSheet({ id: fileId, name: decodeURIComponent(fileName), mimeType });
+    }
+  }, [searchParams]);
 
   const scrollToBottom = () => {
     requestAnimationFrame(() => {
@@ -64,7 +192,10 @@ export default function SheetsChatPage() {
 
       if (!res.ok) throw new Error(data.detail || data.error || 'Sheets request failed');
 
-      if (data.sessionId) setSessionId(data.sessionId);
+      if (data.sessionId) {
+        setSessionId(data.sessionId);
+        fetchChatSessions();
+      }
 
       const assistantContent = data.message?.content || 'No response.';
       setMessages((prev) => [
@@ -94,39 +225,128 @@ export default function SheetsChatPage() {
   };
 
   return (
-    <div className="app assistant-page chatgpt-layout">
+    <div className="app assistant-page chatgpt-layout sheets-chat-page">
       <div className="chat-layout">
         <aside className="chat-sidebar">
           <Link to="/" className="chat-sidebar-logo" title="Home">
             <span className="logo-icon">G</span>
           </Link>
 
-          <div className="chat-sidebar-divider">
-            <h3>Sheets</h3>
+          <div className="chat-sidebar-header">
+            <h3>Chat history</h3>
+          </div>
+          <div className="chat-history-section">
+            <button type="button" className="chat-sidebar-change-btn" onClick={startNewChat}>
+              New chat
+            </button>
+            {sessionsLoading ? (
+              <p className="chat-sidebar-empty">Loading…</p>
+            ) : chatSessions.length > 0 ? (
+              <ul className="chat-history-list">
+                {chatSessions.map((s) => {
+                  const fullTitle = s.title || 'New chat';
+                  const shortTitle = fullTitle.length > 24 ? fullTitle.slice(0, 24) : fullTitle;
+                  const isMenuOpen = sessionMenuOpen === s.id;
+                  const isDeleting = deletingSessionId === s.id;
+                  return (
+                    <li key={s.id} className="chat-history-item">
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        className={`chat-sidebar-file-item chat-history-card ${sessionId === s.id ? 'selected' : ''}`}
+                        onClick={() => { setSessionMenuOpen(null); loadSession(s.id); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSessionMenuOpen(null); loadSession(s.id); } }}
+                        title={fullTitle}
+                      >
+                        <span className="chat-history-title">{shortTitle}</span>
+                        <button
+                          type="button"
+                          className="chat-history-dots"
+                          onClick={(e) => { e.stopPropagation(); setSessionMenuOpen(isMenuOpen ? null : s.id); }}
+                          aria-label="Options"
+                        >
+                          ⋯
+                        </button>
+                      </div>
+                      {isMenuOpen && (
+                        <div className="chat-history-menu" ref={sessionMenuRef}>
+                          <button
+                            type="button"
+                            className="chat-history-menu-delete"
+                            onClick={(e) => handleDeleteSession(s.id, e)}
+                            disabled={isDeleting}
+                          >
+                            {isDeleting ? 'Deleting…' : 'Delete'}
+                          </button>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="chat-sidebar-empty">No chats yet</p>
+            )}
           </div>
 
+          <div className="chat-sidebar-header chat-sidebar-divider" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+            <h3>Files</h3>
+            <button
+              type="button"
+              className="chat-sidebar-change-btn"
+              onClick={fetchDriveFiles}
+              disabled={driveFilesLoading}
+              title="Refresh file list"
+              aria-label="Refresh file list"
+              style={{ width: 'auto', padding: '0.25rem 0.5rem', flexShrink: 0 }}
+            >
+              {driveFilesLoading ? '…' : '↻'}
+            </button>
+          </div>
           <div className="chat-sidebar-file">
-            <div style={{ padding: '0.25rem 0.15rem' }}>
-              <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 6 }}>
-                SpreadsheetId (optional)
-              </label>
-              <input
-                value={spreadsheetId}
-                onChange={(e) => setSpreadsheetId(e.target.value)}
-                placeholder="e.g. 1AbC...xYz"
-                style={{
-                  width: '100%',
-                  padding: '0.5rem 0.6rem',
-                  border: '1px solid var(--border)',
-                  borderRadius: 8,
-                  background: 'var(--bg-tertiary)',
-                  color: 'var(--text-primary)',
-                }}
-              />
-              <div style={{ marginTop: 10, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                Leave blank to let the agent request/create.
+            {selectedSheet && (
+              <div className="chat-sidebar-file-info" style={{ marginBottom: '0.5rem' }}>
+                <span className="chat-sidebar-file-name" title={selectedSheet.name} style={{ display: 'block', fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {selectedSheet.name}
+                </span>
+                <a
+                  href={`https://docs.google.com/spreadsheets/d/${selectedSheet.id}/edit`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="chat-sidebar-open-link"
+                  style={{ fontSize: '0.8rem', marginTop: 4, display: 'inline-block' }}
+                >
+                  Open in Sheets
+                </a>
+                <button
+                  type="button"
+                  className="chat-sidebar-clear-btn"
+                  onClick={clearSheet}
+                  style={{ marginTop: 6, display: 'block' }}
+                >
+                  Clear
+                </button>
               </div>
-            </div>
+            )}
+            {driveFiles.length > 0 ? (
+              <ul className="chat-sidebar-file-list">
+                {driveFiles.map((f) => (
+                  <li key={f.id}>
+                    <button
+                      type="button"
+                      className={`chat-sidebar-file-item ${selectedSheet?.id === f.id ? 'selected' : ''}`}
+                      onClick={() => selectSheet(f)}
+                    >
+                      {f.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="chat-sidebar-empty">
+                {driveFilesLoading ? 'Loading…' : 'No spreadsheets'}
+              </p>
+            )}
           </div>
 
           <div style={{ marginTop: 'auto' }} />
@@ -137,8 +357,12 @@ export default function SheetsChatPage() {
             {messages.length === 0 ? (
               <div className="welcome">
                 <div className="welcome-card">
-                  <h2>Sheets data injection</h2>
-                  <p>Populate a Google Sheet with financial model inputs, tables, and basic formatting.</p>
+                  <h2>{selectedSheet ? `Working on "${selectedSheet.name}"` : 'Sheets data injection'}</h2>
+                  <p>
+                    {selectedSheet
+                      ? 'Describe what you want to write into this spreadsheet (ranges, tables, formatting).'
+                      : 'Select a spreadsheet from the sidebar, or leave unselected to let the agent create/request one. Populate with financial model inputs, tables, and basic formatting.'}
+                  </p>
                   <ul className="suggestions">
                     <li onClick={() => setInput('Create a simple model template with a header row for Revenue, Cost, and Profit for Q1-Q4.')}>
                       Create a simple model template
@@ -171,7 +395,7 @@ export default function SheetsChatPage() {
                 ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Describe what you want to write into the sheet (ranges, tables, formatting)..."
+                placeholder={selectedSheet ? `Describe what to write into "${selectedSheet.name}"...` : 'Select a spreadsheet from the sidebar, or describe what you want to create...'}
                 rows={1}
                 disabled={isLoading}
                 className="chat-textarea"

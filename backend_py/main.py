@@ -27,8 +27,8 @@ import tempfile
 
 from agent import run_agent
 from agent.planner import generate_plan
-from agent.research import run_research_agent
 from agent_excel import run_sheets_agent
+from agent.research import run_research_agent
 from gws import drive_files_list, presentations_get
 from database import init_db
 from database.drive_files import upsert_drive_files, get_drive_files_from_db
@@ -37,7 +37,9 @@ from database.slide_templates import list_templates as list_slide_templates, ups
 from database.branding_logos import (
     list_logos as list_branding_logos,
     upsert_logo as upsert_branding_logo,
+    upsert_logo_url as upsert_branding_logo_url,
     get_small_data_url_by_role,
+    get_logo_image_url_by_role,
     upsert_logo_prefs,
     get_logo_prefs,
 )
@@ -431,12 +433,14 @@ async def execute_plan(request: dict):
         tgt_m = logo_overrides.get("targetMarginEmu") or prefs.get("targetMarginEmu") or 250000
 
         logos = []
-        my_url = get_small_data_url_by_role("my")
-        if my_url:
-            logos.append({"url": my_url, "corner": my_corner, "idPrefix": "logo_my", "widthEmu": int(my_w), "heightEmu": int(my_h), "marginEmu": int(my_m)})
-        tgt_url = get_small_data_url_by_role("target")
-        if tgt_url:
-            logos.append({"url": tgt_url, "corner": target_corner, "idPrefix": "logo_target", "widthEmu": int(tgt_w), "heightEmu": int(tgt_h), "marginEmu": int(tgt_m)})
+        add_logos = logo_overrides.get("addLogosToSlides", False)
+        if add_logos:
+            my_url = get_logo_image_url_by_role("my")
+            if my_url:
+                logos.append({"url": my_url, "corner": my_corner, "idPrefix": "logo_my", "widthEmu": int(my_w), "heightEmu": int(my_h), "marginEmu": int(my_m)})
+            tgt_url = get_logo_image_url_by_role("target")
+            if tgt_url:
+                logos.append({"url": tgt_url, "corner": target_corner, "idPrefix": "logo_target", "widthEmu": int(tgt_w), "heightEmu": int(tgt_h), "marginEmu": int(tgt_m)})
 
         scaffolded = scaffold_presentation(
             title=title,
@@ -502,51 +506,6 @@ async def execute_plan(request: dict):
         }
 
 
-@app.post("/api/sheets-chat")
-async def sheets_chat(request: dict):
-    """Sheets agent chat: read/write/format Google Sheets via gws Sheets API."""
-    log = logging.getLogger("main.sheets_chat")
-    messages = request.get("messages", [])
-    if not messages:
-        raise HTTPException(status_code=400, detail="messages array required")
-
-    spreadsheet_id = request.get("spreadsheetId") or request.get("spreadsheet_id")
-    log.info("sheets-chat request: spreadsheetId=%r messages=%d", spreadsheet_id, len(messages))
-
-    session_id = create_session_if_needed(request.get("sessionId"))
-
-    last_user = next((m for m in reversed(messages) if m.get("role") == "user"), None)
-    if last_user:
-        user_content = last_user.get("content", "")
-        if isinstance(user_content, list):
-            user_content = user_content[0].get("text", "") if user_content else ""
-        add_message(session_id, "user", str(user_content), mode="sheets")
-        update_session_title(session_id, (str(user_content)[:100]) or "New chat")
-
-    try:
-        result = run_sheets_agent(messages, spreadsheet_id=spreadsheet_id)
-        content = str(result["text"])
-        add_message(session_id, "assistant", content, mode="sheets")
-        return {
-            "sessionId": session_id,
-            "message": {"role": "assistant", "content": content},
-            "toolCalls": [
-                {"name": str(t["name"]), "args": _json_safe(t.get("args", {}))}
-                for t in result.get("tool_calls", [])
-            ],
-        }
-    except Exception as e:
-        log.exception("sheets-chat failed")
-        err_msg = f"Error: {e}. Ensure gws is installed and authenticated for Sheets."
-        add_message(session_id, "assistant", err_msg, mode="sheets")
-        return {
-            "sessionId": session_id,
-            "error": str(e),
-            "message": {"role": "assistant", "content": err_msg},
-            "toolCalls": [],
-        }
-
-
 @app.post("/api/chat")
 async def chat(request: dict):
     messages = request.get("messages", [])
@@ -592,10 +551,50 @@ async def chat(request: dict):
         }
 
 
+@app.post("/api/sheets-chat")
+async def sheets_chat(request: dict):
+    """Sheets assistant chat: messages + optional spreadsheetId (from sidebar selection)."""
+    messages = request.get("messages", [])
+    if not messages:
+        raise HTTPException(status_code=400, detail="messages array required")
+    spreadsheet_id = (request.get("spreadsheetId") or "").strip() or None
+    session_id = create_session_if_needed(request.get("sessionId"))
+
+    last_user = next((m for m in reversed(messages) if m.get("role") == "user"), None)
+    if last_user:
+        user_content = last_user.get("content", "")
+        if isinstance(user_content, list):
+            user_content = user_content[0].get("text", "") if user_content else ""
+        add_message(session_id, "user", str(user_content), mode="sheets")
+        update_session_title(session_id, (str(user_content)[:100]) or "Sheets chat")
+
+    try:
+        result = run_sheets_agent(messages, spreadsheet_id=spreadsheet_id)
+        content = str(result.get("text") or "No response")
+        add_message(session_id, "assistant", content, mode="sheets")
+        return {
+            "sessionId": session_id,
+            "message": {"role": "assistant", "content": content},
+            "toolCalls": [
+                {"name": str(t.get("name", "")), "args": _json_safe(t.get("args", {}))}
+                for t in result.get("tool_calls", [])
+            ],
+        }
+    except Exception as e:
+        err_msg = f"Sheets agent error: {e}"
+        add_message(session_id, "assistant", err_msg, mode="sheets")
+        return {
+            "sessionId": session_id,
+            "error": str(e),
+            "message": {"role": "assistant", "content": err_msg},
+            "toolCalls": [],
+        }
+
+
 @app.get("/api/chat/sessions")
-async def get_chat_sessions(limit: int = 50):
-    """List chat sessions, most recent first."""
-    return {"sessions": list_sessions(limit=limit)}
+async def get_chat_sessions(limit: int = 50, mode: str | None = None):
+    """List chat sessions, most recent first. mode=sheets: only sessions with sheets messages."""
+    return {"sessions": list_sessions(limit=limit, mode=mode)}
 
 
 @app.get("/api/chat/sessions/{session_id:int}")
@@ -698,6 +697,20 @@ async def branding_logos_upload(
 
     meta = upsert_branding_logo(role=role, filename=file.filename or "", content_type=ctype, png_bytes=png_bytes, small_data_url=data_url)
     return {"ok": True, "logo": meta, "dataUrlLength": len(data_url)}
+
+
+@app.post("/api/branding/logos/url")
+async def branding_logos_set_url(request: dict):
+    """Set a logo by public URL (no upload). Role: 'my' or 'target'."""
+    role = (request.get("role") or "").strip().lower()
+    url = (request.get("url") or "").strip()
+    if not role or not url:
+        raise HTTPException(status_code=400, detail="role and url required")
+    try:
+        meta = upsert_branding_logo_url(role=role, url=url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "logo": meta}
 
 
 @app.post("/api/branding/logo-prefs")

@@ -315,6 +315,8 @@ function ChatPage() {
   const [designOutlineDialogMessageIndex, setDesignOutlineDialogMessageIndex] = useState(null);
   const [designOutlineMyLogoPreview, setDesignOutlineMyLogoPreview] = useState(null);
   const [designOutlineTargetLogoPreview, setDesignOutlineTargetLogoPreview] = useState(null);
+  const [designOutlineMyLogoUrl, setDesignOutlineMyLogoUrl] = useState('');
+  const [designOutlineTargetLogoUrl, setDesignOutlineTargetLogoUrl] = useState('');
   const [designOutlineMyCorner, setDesignOutlineMyCorner] = useState('top_left');
   const [designOutlineTargetCorner, setDesignOutlineTargetCorner] = useState('top_right');
   const [designOutlineMyWidthEmu, setDesignOutlineMyWidthEmu] = useState(600000);
@@ -324,11 +326,11 @@ function ChatPage() {
   const [designOutlineTargetHeightEmu, setDesignOutlineTargetHeightEmu] = useState(600000);
   const [designOutlineTargetMarginEmu, setDesignOutlineTargetMarginEmu] = useState(250000);
   const [designOutlineTab, setDesignOutlineTab] = useState('logos'); // 'logos' | 'advanced'
+  const [designOutlineAddLogosToSlides, setDesignOutlineAddLogosToSlides] = useState(false);
   const [logoOverrides, setLogoOverrides] = useState(null);
   const [designOutlineExtracted, setDesignOutlineExtracted] = useState(null);
   const [designOutlineExtracting, setDesignOutlineExtracting] = useState(false);
   const [designOutlineSavingBranding, setDesignOutlineSavingBranding] = useState(false);
-  const [designOutlineDbBranding, setDesignOutlineDbBranding] = useState(null);
   const [extractLoading, setExtractLoading] = useState(false);
   const [pinnedExtractedSlides, setPinnedExtractedSlides] = useState(null);
   const [findReplacementsLoading, setFindReplacementsLoading] = useState(false);
@@ -682,9 +684,12 @@ function ChatPage() {
     setDesignOutlineDialogMessageIndex(messageIndex);
     setDesignOutlineMyLogoPreview(null);
     setDesignOutlineTargetLogoPreview(null);
+    setDesignOutlineMyLogoUrl('');
+    setDesignOutlineTargetLogoUrl('');
     setDesignOutlineExtracted(null);
     setDesignOutlineExtracting(false);
     setDesignOutlineSavingBranding(false);
+    setDesignOutlineAddLogosToSlides(false);
     setDesignOutlineTab('logos');
     setDesignOutlineDialogOpen(true);
     if (designOutlineMyLogoInputRef.current) designOutlineMyLogoInputRef.current.value = '';
@@ -696,7 +701,6 @@ function ChatPage() {
         const res = await fetch(`${API_BASE}/branding/logos`);
         const data = await res.json();
         if (!res.ok) return;
-        setDesignOutlineDbBranding(data);
         const prefs = data.prefs || {};
         if (prefs.myCorner) setDesignOutlineMyCorner(prefs.myCorner);
         if (prefs.targetCorner) setDesignOutlineTargetCorner(prefs.targetCorner);
@@ -707,10 +711,22 @@ function ChatPage() {
         if (prefs.targetHeightEmu) setDesignOutlineTargetHeightEmu(prefs.targetHeightEmu);
         if (prefs.targetMarginEmu) setDesignOutlineTargetMarginEmu(prefs.targetMarginEmu);
         const logos = Array.isArray(data.logos) ? data.logos : [];
-        const my = logos.find((l) => l.role === 'my' && l.smallDataUrl);
-        const tgt = logos.find((l) => l.role === 'target' && l.smallDataUrl);
-        if (my?.smallDataUrl) setDesignOutlineMyLogoPreview(my.smallDataUrl);
-        if (tgt?.smallDataUrl) setDesignOutlineTargetLogoPreview(tgt.smallDataUrl);
+        const my = logos.find((l) => l.role === 'my');
+        const tgt = logos.find((l) => l.role === 'target');
+        if (my) {
+          if (my.logoUrl) {
+            setDesignOutlineMyLogoPreview(my.logoUrl);
+          } else if (my.smallDataUrl) {
+            setDesignOutlineMyLogoPreview(my.smallDataUrl);
+          }
+        }
+        if (tgt) {
+          if (tgt.logoUrl) {
+            setDesignOutlineTargetLogoPreview(tgt.logoUrl);
+          } else if (tgt.smallDataUrl) {
+            setDesignOutlineTargetLogoPreview(tgt.smallDataUrl);
+          }
+        }
       } catch (err) {
         console.error('Failed to load branding:', err);
       }
@@ -729,6 +745,8 @@ function ChatPage() {
     setDesignOutlineDialogMessageIndex(null);
     setDesignOutlineMyLogoPreview(null);
     setDesignOutlineTargetLogoPreview(null);
+    setDesignOutlineMyLogoUrl('');
+    setDesignOutlineTargetLogoUrl('');
     setDesignOutlineExtracted(null);
     setDesignOutlineExtracting(false);
     setDesignOutlineSavingBranding(false);
@@ -740,12 +758,14 @@ function ChatPage() {
     if (role === 'my') {
       if (designOutlineMyLogoPreview) URL.revokeObjectURL(designOutlineMyLogoPreview);
       setDesignOutlineMyLogoPreview(URL.createObjectURL(file));
+      setDesignOutlineMyLogoUrl('');
       return;
     }
 
     if (role === 'target') {
       if (designOutlineTargetLogoPreview) URL.revokeObjectURL(designOutlineTargetLogoPreview);
       setDesignOutlineTargetLogoPreview(URL.createObjectURL(file));
+      setDesignOutlineTargetLogoUrl('');
       // Extract palette from TARGET logo
       setDesignOutlineExtracted(null);
       setDesignOutlineExtracting(true);
@@ -776,11 +796,31 @@ function ChatPage() {
     }
   };
 
+  const handleClearDesignOutlineLogo = (role) => {
+    if (role === 'my') {
+      if (designOutlineMyLogoPreview && designOutlineMyLogoPreview.startsWith('blob:')) {
+        URL.revokeObjectURL(designOutlineMyLogoPreview);
+      }
+      setDesignOutlineMyLogoPreview(null);
+      setDesignOutlineMyLogoUrl('');
+      if (designOutlineMyLogoInputRef.current) designOutlineMyLogoInputRef.current.value = '';
+      return;
+    }
+    if (designOutlineTargetLogoPreview && designOutlineTargetLogoPreview.startsWith('blob:')) {
+      URL.revokeObjectURL(designOutlineTargetLogoPreview);
+    }
+    setDesignOutlineTargetLogoPreview(null);
+    setDesignOutlineTargetLogoUrl('');
+    setDesignOutlineExtracted(null);
+    if (designOutlineTargetLogoInputRef.current) designOutlineTargetLogoInputRef.current.value = '';
+  };
+
   const saveBrandingLogosAndPrefs = async () => {
-    // Upload logos (if chosen) and save corner prefs in DB.
-    const uploads = [];
+    // Upload logos (if file chosen) or set by URL; then save corner prefs in DB.
     const myFile = designOutlineMyLogoInputRef.current?.files?.[0];
     const targetFile = designOutlineTargetLogoInputRef.current?.files?.[0];
+    const myUrl = (designOutlineMyLogoUrl || '').trim();
+    const targetUrl = (designOutlineTargetLogoUrl || '').trim();
 
     const uploadOne = async (role, file) => {
       const form = new FormData();
@@ -792,9 +832,23 @@ function ChatPage() {
       return data;
     };
 
-    if (myFile) uploads.push(uploadOne('my', myFile));
-    if (targetFile) uploads.push(uploadOne('target', targetFile));
-    if (uploads.length) await Promise.all(uploads);
+    const setUrlOne = async (role, url) => {
+      const res = await fetch(`${API_BASE}/branding/logos/url`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role, url }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Failed to set ${role} logo URL`);
+      return data;
+    };
+
+    const tasks = [];
+    if (myFile) tasks.push(uploadOne('my', myFile));
+    else if (myUrl) tasks.push(setUrlOne('my', myUrl));
+    if (targetFile) tasks.push(uploadOne('target', targetFile));
+    else if (targetUrl) tasks.push(setUrlOne('target', targetUrl));
+    if (tasks.length) await Promise.all(tasks);
 
     const prefsRes = await fetch(`${API_BASE}/branding/logo-prefs`, {
       method: 'POST',
@@ -814,6 +868,7 @@ function ChatPage() {
     if (!prefsRes.ok) throw new Error(prefsData.detail || 'Failed to save logo corner preferences');
 
     setLogoOverrides({
+      addLogosToSlides: designOutlineAddLogosToSlides,
       myCorner: designOutlineMyCorner,
       targetCorner: designOutlineTargetCorner,
       myWidthEmu: designOutlineMyWidthEmu,
@@ -2093,29 +2148,24 @@ function ChatPage() {
               </div>
               {designOutlineTab === 'logos' && (
                 <>
+              <div className="design-outline-add-logos-row">
+                <label htmlFor="design-outline-add-logos-toggle" className="settings-toggle-label">
+                  Add logos to slides
+                </label>
+                <button
+                  type="button"
+                  role="switch"
+                  id="design-outline-add-logos-toggle"
+                  aria-checked={designOutlineAddLogosToSlides}
+                  className={`settings-toggle ${designOutlineAddLogosToSlides ? 'on' : 'off'}`}
+                  onClick={() => setDesignOutlineAddLogosToSlides((v) => !v)}
+                >
+                  <span className="settings-toggle-slider" />
+                </button>
+              </div>
               <p className="design-outline-dialog-desc">
-                Optional: upload up to two logos (your firm + target company) and choose corners. Logos are stored and reused.
+                Optional: upload an image or paste a logo URL. Target logo extracts a color palette for design. Logos are only added when the toggle above is on.
               </p>
-              {designOutlineDbBranding?.logos?.length > 0 && (
-                <div className="design-outline-branding-saved">
-                  <div className="design-outline-color-label">Saved branding (from DB)</div>
-                  <div className="design-outline-saved-logos">
-                    {designOutlineDbBranding.logos.map((l) => (
-                      <div key={l.role} className="design-outline-saved-logo">
-                        <div className="design-outline-saved-logo-title">
-                          {l.role === 'my' ? 'Your logo' : 'Target logo'}
-                        </div>
-                        {l.smallDataUrl ? (
-                          <img className="design-outline-logo-preview" src={l.smallDataUrl} alt={`${l.role} logo`} />
-                        ) : (
-                          <div className="design-outline-saved-logo-missing">No logo stored</div>
-                        )}
-                        <div className="design-outline-saved-logo-meta">{l.filename || ''}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
               <div className="settings-field">
                 <label htmlFor="design-outline-my-logo-upload" className="settings-toggle-label">
                   Your company logo
@@ -2130,16 +2180,42 @@ function ChatPage() {
                     onChange={(e) => handleDesignOutlineLogoChange('my', e)}
                   />
                   <label htmlFor="design-outline-my-logo-upload" className="settings-upload-btn">
-                    Choose image
+                    Upload image
                   </label>
-                  {designOutlineMyLogoPreview && (
+                  <span className="design-outline-or"> or </span>
+                  <input
+                    type="url"
+                    className="settings-input design-outline-url-input"
+                    placeholder="Paste image URL (https://...)"
+                    value={designOutlineMyLogoUrl}
+                    onChange={(e) => {
+                      setDesignOutlineMyLogoUrl(e.target.value);
+                      const v = (e.target.value || '').trim();
+                      if (v && (v.startsWith('http://') || v.startsWith('https://'))) {
+                        setDesignOutlineMyLogoPreview(v);
+                      } else if (!v) {
+                        setDesignOutlineMyLogoPreview(null);
+                      }
+                    }}
+                  />
+                </div>
+                {designOutlineMyLogoPreview && (
+                  <div className="design-outline-preview-row">
                     <img
                       src={designOutlineMyLogoPreview}
                       alt="Logo preview"
                       className="design-outline-logo-preview"
                     />
-                  )}
-                </div>
+                    <button
+                      type="button"
+                      className="design-outline-clear-btn"
+                      onClick={() => handleClearDesignOutlineLogo('my')}
+                      aria-label="Remove your logo"
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
                 <div className="design-outline-corner-row">
                   <span className="design-outline-corner-label">Corner</span>
                   <select
@@ -2168,16 +2244,42 @@ function ChatPage() {
                     onChange={(e) => handleDesignOutlineLogoChange('target', e)}
                   />
                   <label htmlFor="design-outline-target-logo-upload" className="settings-upload-btn">
-                    Choose image
+                    Upload image
                   </label>
-                  {designOutlineTargetLogoPreview && (
+                  <span className="design-outline-or"> or </span>
+                  <input
+                    type="url"
+                    className="settings-input design-outline-url-input"
+                    placeholder="Paste image URL (https://...)"
+                    value={designOutlineTargetLogoUrl}
+                    onChange={(e) => {
+                      setDesignOutlineTargetLogoUrl(e.target.value);
+                      const v = (e.target.value || '').trim();
+                      if (v && (v.startsWith('http://') || v.startsWith('https://'))) {
+                        setDesignOutlineTargetLogoPreview(v);
+                      } else if (!v) {
+                        setDesignOutlineTargetLogoPreview(null);
+                      }
+                    }}
+                  />
+                </div>
+                {designOutlineTargetLogoPreview && (
+                  <div className="design-outline-preview-row">
                     <img
                       src={designOutlineTargetLogoPreview}
                       alt="Target logo preview"
                       className="design-outline-logo-preview"
                     />
-                  )}
-                </div>
+                    <button
+                      type="button"
+                      className="design-outline-clear-btn"
+                      onClick={() => handleClearDesignOutlineLogo('target')}
+                      aria-label="Remove target logo"
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
                 <div className="design-outline-corner-row">
                   <span className="design-outline-corner-label">Corner</span>
                   <select

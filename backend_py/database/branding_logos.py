@@ -27,13 +27,14 @@ def upsert_logo(role: str, filename: str, content_type: str, png_bytes: bytes, s
         conn.execute(
             text(
                 """
-                INSERT INTO branding_logos (role, filename, content_type, png_bytes, small_data_url, created_at, updated_at)
-                VALUES (:role, :filename, :content_type, :png_bytes, :small_data_url, :now, :now)
+                INSERT INTO branding_logos (role, filename, content_type, png_bytes, small_data_url, logo_url, created_at, updated_at)
+                VALUES (:role, :filename, :content_type, :png_bytes, :small_data_url, NULL, :now, :now)
                 ON CONFLICT(role) DO UPDATE SET
                     filename = excluded.filename,
                     content_type = excluded.content_type,
                     png_bytes = excluded.png_bytes,
                     small_data_url = excluded.small_data_url,
+                    logo_url = NULL,
                     updated_at = excluded.updated_at
                 """
             ),
@@ -64,7 +65,7 @@ def upsert_logo(role: str, filename: str, content_type: str, png_bytes: bytes, s
 def list_logos() -> list[dict[str, Any]]:
     with engine.connect() as conn:
         rows = conn.execute(
-            text("SELECT id, role, filename, content_type, small_data_url, created_at, updated_at FROM branding_logos ORDER BY role ASC")
+            text("SELECT id, role, filename, content_type, small_data_url, logo_url, created_at, updated_at FROM branding_logos ORDER BY role ASC")
         ).fetchall()
     return [
         {
@@ -73,8 +74,9 @@ def list_logos() -> list[dict[str, Any]]:
             "filename": r[2],
             "contentType": r[3],
             "smallDataUrl": r[4],
-            "createdAt": r[5],
-            "updatedAt": r[6],
+            "logoUrl": r[5],
+            "createdAt": r[6],
+            "updatedAt": r[7],
         }
         for r in rows
     ]
@@ -90,6 +92,63 @@ def get_small_data_url_by_role(role: str) -> str | None:
             {"role": role},
         ).fetchone()
     return (row[0] if row else None) or None
+
+
+def get_logo_image_url_by_role(role: str) -> str | None:
+    """Return URL to use for scaffold: logo_url if set, else small_data_url."""
+    role = (role or "").strip().lower()
+    if role not in ("my", "target"):
+        return None
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT logo_url, small_data_url FROM branding_logos WHERE role = :role"),
+            {"role": role},
+        ).fetchone()
+    if not row:
+        return None
+    logo_url, small_data_url = row[0], row[1]
+    if logo_url and isinstance(logo_url, str) and logo_url.strip():
+        return logo_url.strip()
+    return (small_data_url if small_data_url else None) or None
+
+
+def upsert_logo_url(role: str, url: str) -> dict[str, Any]:
+    """Store a public logo URL for the role (no upload). Use for createImage in scaffold."""
+    role = (role or "").strip().lower()
+    if role not in ("my", "target"):
+        raise ValueError("role must be 'my' or 'target'")
+    url = (url or "").strip()
+    if not url:
+        raise ValueError("url required")
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("url must start with http:// or https://")
+    now = datetime.utcnow().isoformat()
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO branding_logos (role, filename, content_type, png_bytes, small_data_url, logo_url, created_at, updated_at)
+                VALUES (:role, '', 'url', NULL, NULL, :logo_url, :now, :now)
+                ON CONFLICT(role) DO UPDATE SET
+                    logo_url = excluded.logo_url,
+                    updated_at = excluded.updated_at
+                """
+            ),
+            {"role": role, "logo_url": url, "now": now},
+        )
+        conn.commit()
+        row = conn.execute(
+            text("SELECT id, role, filename, content_type, created_at, updated_at FROM branding_logos WHERE role = :role"),
+            {"role": role},
+        ).fetchone()
+    return {
+        "id": row[0],
+        "role": row[1],
+        "filename": row[2],
+        "contentType": row[3],
+        "createdAt": row[4],
+        "updatedAt": row[5],
+    }
 
 
 def upsert_logo_prefs(

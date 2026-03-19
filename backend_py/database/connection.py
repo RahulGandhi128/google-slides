@@ -121,6 +121,7 @@ def init_db():
               content_type TEXT,
               png_bytes BLOB,
               small_data_url TEXT,
+              logo_url TEXT,
               created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
               updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -156,3 +157,11 @@ def init_db():
                 conn.commit()
             except Exception:
                 pass
+
+    # Migration: add logo_url to branding_logos (for public URL option)
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE branding_logos ADD COLUMN logo_url TEXT"))
+            conn.commit()
+        except Exception:
+            pass  # column may already exist

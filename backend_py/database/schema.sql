@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS branding_logos (
   content_type TEXT,
   png_bytes BLOB,
   small_data_url TEXT,
+  logo_url TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

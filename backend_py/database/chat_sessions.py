@@ -86,16 +86,31 @@ def add_message(
         db.close()
 
 
-def list_sessions(limit: int = 50) -> list[dict[str, Any]]:
-    """List chat sessions, most recent first."""
+def list_sessions(limit: int = 50, mode: str | None = None) -> list[dict[str, Any]]:
+    """List chat sessions, most recent first. If mode is set, only return sessions with at least one message of that mode."""
     db = SessionLocal()
     try:
-        r = db.execute(
-            text(
-                "SELECT id, title, created_at, updated_at FROM chat_sessions ORDER BY updated_at DESC LIMIT :limit"
-            ),
-            {"limit": limit},
-        )
+        if mode:
+            r = db.execute(
+                text(
+                    """
+                    SELECT DISTINCT s.id, s.title, s.created_at, s.updated_at
+                    FROM chat_sessions s
+                    LEFT JOIN chat_messages m ON m.session_id = s.id
+                    WHERE m.mode = :mode
+                    ORDER BY s.updated_at DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"limit": limit, "mode": mode},
+            )
+        else:
+            r = db.execute(
+                text(
+                    "SELECT id, title, created_at, updated_at FROM chat_sessions ORDER BY updated_at DESC LIMIT :limit"
+                ),
+                {"limit": limit},
+            )
         rows = r.fetchall()
         return [
             {
