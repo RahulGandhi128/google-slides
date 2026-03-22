@@ -134,6 +134,86 @@ TOOL_DECLARATIONS = [
             "required": ["title", "numSlides"],
         },
     ),
+    FunctionDeclaration(
+        name="add_process_infographic",
+        description="Add a horizontal or vertical process flow infographic (boxes connected by arrows) to a slide. Use for workflows, pipelines, step sequences. Creates a grouped design using theme colors or optional color override. Returns success with groupObjectId.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "presentationId": {"type": "string", "description": "The presentation ID"},
+                "pageObjectId": {"type": "string", "description": "The slide's page object ID"},
+                "steps": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Labels for each step, e.g. ['Research', 'Build', 'Launch']",
+                },
+                "orientation": {"type": "string", "description": "horizontal or vertical", "enum": ["horizontal", "vertical"]},
+                "translateX": {"type": "integer", "description": "Left position in EMU (default: centered)"},
+                "translateY": {"type": "integer", "description": "Top position in EMU (default: ~1/5 from top)"},
+                "themeColors": {
+                    "type": "object",
+                    "description": "Theme colors (hex). Uses accent_color, shapes_color, charts_color.",
+                    "properties": {
+                        "accent_color": {"type": "string"},
+                        "shapes_color": {"type": "string"},
+                        "charts_color": {"type": "string"},
+                    },
+                },
+                "colors": {"type": "array", "items": {"type": "string"}, "description": "Override: hex colors per step, e.g. ['#3366CC', '#34A853']"},
+                "idPrefix": {"type": "string", "description": "Prefix for object IDs (default: process)"},
+            },
+            "required": ["presentationId", "pageObjectId", "steps"],
+        },
+    ),
+    FunctionDeclaration(
+        name="add_grid_infographic",
+        description="Add a grid infographic (rows x columns of cells) to a slide. Use for stat cards, data grids, feature matrices. Creates a grouped design. Returns success with groupObjectId.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "presentationId": {"type": "string", "description": "The presentation ID"},
+                "pageObjectId": {"type": "string", "description": "The slide's page object ID"},
+                "rows": {"type": "integer", "description": "Number of rows"},
+                "columns": {"type": "integer", "description": "Number of columns"},
+                "cells": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Cell content strings in row-major order (e.g. ['A','B','C','D','E','F'] for 2x3 grid).",
+                },
+                "translateX": {"type": "integer", "description": "Left position in EMU (default: centered)"},
+                "translateY": {"type": "integer", "description": "Top position in EMU (default: ~1/6 from top)"},
+                "themeColors": {"type": "object", "description": "Theme colors (hex) for default cell fills"},
+                "colors": {"type": "array", "items": {"type": "string"}, "description": "Override: flat list of hex colors (row-major)"},
+                "idPrefix": {"type": "string", "description": "Prefix for object IDs (default: grid)"},
+            },
+            "required": ["presentationId", "pageObjectId", "rows", "columns"],
+        },
+    ),
+    FunctionDeclaration(
+        name="add_circular_process_infographic",
+        description="Add a circular process infographic (steps arranged on a circle with arrows) to a slide. Use for cycles, recurring processes, phase diagrams. Creates a grouped design. Returns success with groupObjectId.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "presentationId": {"type": "string", "description": "The presentation ID"},
+                "pageObjectId": {"type": "string", "description": "The slide's page object ID"},
+                "steps": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Labels for each step, e.g. ['Phase 1', 'Phase 2', 'Phase 3', 'Phase 4']",
+                },
+                "arrowCount": {"type": "integer", "description": "Number of arrows between steps (default: len(steps)). Use 0 to omit arrows."},
+                "radiusEmu": {"type": "integer", "description": "Radius of circle in EMU (default ~2.2 in)"},
+                "startAngleDeg": {"type": "number", "description": "Start angle in degrees (0=right, 90=bottom)"},
+                "centerX": {"type": "integer", "description": "Center X in EMU (default: slide center)"},
+                "centerY": {"type": "integer", "description": "Center Y in EMU (default: slide center)"},
+                "themeColors": {"type": "object", "description": "Theme colors (hex)"},
+                "colors": {"type": "array", "items": {"type": "string"}, "description": "Override: hex colors per step"},
+                "idPrefix": {"type": "string", "description": "Prefix for object IDs (default: circular)"},
+            },
+            "required": ["presentationId", "pageObjectId", "steps"],
+        },
+    ),
 ]
 
 SYSTEM_INSTRUCTION = """You are a Google Workspace assistant for Slides and Drive, acting as a professional designer and content creator. Work step-by-step until the task is complete.
@@ -152,8 +232,14 @@ When the user asks to create a presentation WITH content:
 
 When building a presentation FROM A PLAN (title + N slides + theme colors):
 - First call scaffold_presentation(title, numSlides=N, themeColors from the plan, logoUrl if provided).
-- Use the returned presentationId and slide objectIds to fill content with presentations_batch_update (insertText, updateTextStyle, createShape, createImage, etc.).
+- Use the returned presentationId and slide objectIds to fill content.
 - Do NOT call presentations_create again and do NOT create extra slides beyond the plan count unless explicitly requested.
+
+PREFER DESIGN INFOGRAPHIC TOOLS over manual createShape when the plan specifies them:
+- If a slide's elements include type "process_infographic" (with steps array): call add_process_infographic(presentationId, pageObjectId, steps, orientation, themeColors). Do NOT build boxes+arrows manually via batch_update.
+- If elements include type "grid_infographic" (rows, columns, cells): call add_grid_infographic(presentationId, pageObjectId, rows, columns, cells, themeColors). Do NOT create individual rectangles for each cell.
+- If elements include type "circular_process_infographic" (steps array): call add_circular_process_infographic(presentationId, pageObjectId, steps, themeColors).
+- For other content (titles, body text, icons, images, single decorative shapes): use presentations_batch_update with insertText, updateTextStyle, createShape, createImage, etc.
 
 BULLETED LISTS - For body text with bullets:
 - Use insertText with actual newline characters (U+000A) between items. Do NOT use literal backslash-n (\\n) in the text.
@@ -196,6 +282,13 @@ When users ask for "pretty slides," "colors," "theme," or "aesthetics," use upda
 ICONS - When users ask for icons, decorative icons, or visual symbols on slides:
 - Use add_icon_to_slide with presentationId, pageObjectId, and a descriptive query (e.g. "rocket", "lightbulb", "checkmark").
 - The tool handles search + createImage internally. Do not call search_icon separately.
+
+DESIGN INFOGRAPHICS - PREFER these tools over manual createShape when building workflows, grids, or cycles:
+- add_process_infographic: Workflows, pipelines, step sequences (3–6 steps, boxes + arrows). Use when plan elements include type "process_infographic" or when layout describes "workflow", "pipeline", "steps". Pass themeColors from the plan.
+- add_grid_infographic: Stat cards, feature matrices, 2x2 or 2x3 comparisons. Use when plan elements include type "grid_infographic" or when layout describes "grid", "stat cards", "comparison matrix". Pass cells as string array.
+- add_circular_process_infographic: Cycles, phases, recurring processes (4–6 steps on a circle). Use when plan elements include type "circular_process_infographic" or when layout describes "cycle", "phases", "loop".
+- For single decorative elements (accent bar, background strip, one callout box): use createShape via presentations_batch_update, NOT the infographic tools.
+These tools produce grouped, professional layouts; pass themeColors from the plan for consistency.
 
 You may make up to 40 tool-call rounds (configurable via AGENT_MAX_ROUNDS). Use the full context from each tool result. Do not stop until the user's request is fully satisfied, then respond with a clear summary."""
 
@@ -254,50 +347,8 @@ def _to_jsonable(obj):
     return str(obj)
 
 
-def _make_small_icon_data_url(svg: str, max_url_len: int = 2000) -> str | None:
-    """
-    Render SVG → PNG, aggressively shrink until the data URL is under max_url_len characters.
-    Returns data URL or None if it cannot be made small enough.
-    """
-    import base64
-    from io import BytesIO
-
-    try:
-        from PIL import Image
-    except ImportError:
-        # Pillow not available; fall back to single-size render.
-        png_bytes = svg_to_png_bytes(svg, output_width=32, output_height=32)
-        b64 = base64.b64encode(png_bytes).decode("ascii")
-        data_url = f"data:image/png;base64,{b64}"
-        return data_url if len(data_url) <= max_url_len else None
-
-    width, height = 32, 32  # start small
-
-    for _attempt in range(6):
-        png_bytes = svg_to_png_bytes(svg, output_width=width, output_height=height)
-        try:
-            img = Image.open(BytesIO(png_bytes))
-            img = img.convert("RGBA")
-            img_p = img.quantize(colors=16, method=Image.MEDIANCUT)
-            buf = BytesIO()
-            img_p.save(buf, format="PNG", optimize=True, compress_level=9)
-            png_bytes = buf.getvalue()
-        except Exception:
-            pass
-
-        b64 = base64.b64encode(png_bytes).decode("ascii")
-        data_url = f"data:image/png;base64,{b64}"
-        if len(data_url) <= max_url_len:
-            return data_url
-
-        width = max(8, width // 2)
-        height = max(8, height // 2)
-
-    return None
-
-
 def _execute_add_icon_to_slide(args: dict) -> dict:
-    """Search icon, convert to PNG, add to slide via createImage. Keeps SVG/URL handling internal."""
+    """Search icon, add to slide via createImage. Uses ICON_BASE_URL (tunnel) for full-quality icons."""
     presentation_id = args.get("presentationId")
     page_object_id = args.get("pageObjectId")
     query = args.get("query", "").strip()
@@ -306,6 +357,13 @@ def _execute_add_icon_to_slide(args: dict) -> dict:
     if not presentation_id or not page_object_id or not query:
         return {"success": False, "error": "presentationId, pageObjectId, and query are required"}
 
+    icon_base_url = os.environ.get("ICON_BASE_URL", "").strip().rstrip("/")
+    if not icon_base_url:
+        return {
+            "success": False,
+            "error": "ICON_BASE_URL is required for add_icon_to_slide. Start a tunnel (e.g. npx localtunnel --port 8000 --subdomain ib-scaffold) and set ICON_BASE_URL in .env.",
+        }
+
     try:
         results = search_icon(query, k=1)
         if not results:
@@ -313,23 +371,10 @@ def _execute_add_icon_to_slide(args: dict) -> dict:
 
         icon = results[0]
         name = icon["name"]
-        svg = icon.get("svg", "")
-        if not svg:
+        if not icon.get("svg"):
             return {"success": False, "error": f"Icon '{name}' has no SVG content"}
 
-        data_url = _make_small_icon_data_url(svg, max_url_len=2000)
-        if not data_url:
-            # As a fallback, if ICON_BASE_URL is set, use HTTP endpoint; otherwise return error.
-            icon_base_url = os.environ.get("ICON_BASE_URL", "").rstrip("/")
-            if icon_base_url:
-                image_url = f"{icon_base_url}/api/icon/png?name={name}"
-            else:
-                return {
-                    "success": False,
-                    "error": "Icon SVG cannot be embedded under 2KB and no ICON_BASE_URL is configured.",
-                }
-        else:
-            image_url = data_url
+        image_url = f"{icon_base_url}/api/icon/png?name={name}"
 
         tx = args.get("translateX")
         ty = args.get("translateY")
@@ -370,6 +415,106 @@ def _execute_add_icon_to_slide(args: dict) -> dict:
         return {"success": False, "error": str(e)}
 
 
+def _execute_add_process_infographic(args: dict) -> dict:
+    """Execute add_process_infographic: generate requests and batch update."""
+    presentation_id = args.get("presentationId")
+    page_object_id = args.get("pageObjectId")
+    steps = args.get("steps") or []
+    if not presentation_id or not page_object_id:
+        return {"success": False, "error": "presentationId and pageObjectId are required"}
+    if not steps or not isinstance(steps, list):
+        return {"success": False, "error": "steps (array of strings) is required"}
+    try:
+        from gws.designs import process_flow_requests
+        requests = process_flow_requests(
+            page_object_id,
+            steps,
+            orientation=args.get("orientation") or "horizontal",
+            translate_x=args.get("translateX"),
+            translate_y=args.get("translateY"),
+            theme_colors=args.get("themeColors") or {},
+            colors=args.get("colors"),
+            id_prefix=args.get("idPrefix") or "process",
+        )
+        if not requests:
+            return {"success": False, "error": "No steps to render"}
+        reqs = _normalize_batch_requests(requests)
+        presentations_batch_update(presentation_id, reqs)
+        group_id = f"{args.get('idPrefix') or 'process'}_group"
+        return {"success": True, "groupObjectId": group_id, "stepsCount": len(steps)}
+    except Exception as e:
+        log.warning("add_process_infographic failed: %s", e)
+        return {"success": False, "error": str(e)}
+
+
+def _execute_add_grid_infographic(args: dict) -> dict:
+    """Execute add_grid_infographic: generate requests and batch update."""
+    presentation_id = args.get("presentationId")
+    page_object_id = args.get("pageObjectId")
+    rows = args.get("rows")
+    columns = args.get("columns")
+    if not presentation_id or not page_object_id:
+        return {"success": False, "error": "presentationId and pageObjectId are required"}
+    if rows is None or columns is None or rows < 1 or columns < 1:
+        return {"success": False, "error": "rows and columns (>=1) are required"}
+    try:
+        from gws.designs import grid_requests
+        requests = grid_requests(
+            page_object_id,
+            int(rows),
+            int(columns),
+            cells=args.get("cells"),
+            translate_x=args.get("translateX"),
+            translate_y=args.get("translateY"),
+            theme_colors=args.get("themeColors") or {},
+            colors=args.get("colors"),
+            id_prefix=args.get("idPrefix") or "grid",
+        )
+        if not requests:
+            return {"success": False, "error": "Invalid grid dimensions"}
+        reqs = _normalize_batch_requests(requests)
+        presentations_batch_update(presentation_id, reqs)
+        group_id = f"{args.get('idPrefix') or 'grid'}_group"
+        return {"success": True, "groupObjectId": group_id, "rows": rows, "columns": columns}
+    except Exception as e:
+        log.warning("add_grid_infographic failed: %s", e)
+        return {"success": False, "error": str(e)}
+
+
+def _execute_add_circular_process_infographic(args: dict) -> dict:
+    """Execute add_circular_process_infographic: generate requests and batch update."""
+    presentation_id = args.get("presentationId")
+    page_object_id = args.get("pageObjectId")
+    steps = args.get("steps") or []
+    if not presentation_id or not page_object_id:
+        return {"success": False, "error": "presentationId and pageObjectId are required"}
+    if not steps or not isinstance(steps, list):
+        return {"success": False, "error": "steps (array of strings) is required"}
+    try:
+        from gws.designs import circular_process_requests
+        requests = circular_process_requests(
+            page_object_id,
+            steps,
+            arrow_count=args.get("arrowCount"),
+            radius_emu=args.get("radiusEmu"),
+            start_angle_deg=args.get("startAngleDeg", 0),
+            center_x=args.get("centerX"),
+            center_y=args.get("centerY"),
+            theme_colors=args.get("themeColors") or {},
+            colors=args.get("colors"),
+            id_prefix=args.get("idPrefix") or "circular",
+        )
+        if not requests:
+            return {"success": False, "error": "No steps to render"}
+        reqs = _normalize_batch_requests(requests)
+        presentations_batch_update(presentation_id, reqs)
+        group_id = f"{args.get('idPrefix') or 'circular'}_group"
+        return {"success": True, "groupObjectId": group_id, "stepsCount": len(steps)}
+    except Exception as e:
+        log.warning("add_circular_process_infographic failed: %s", e)
+        return {"success": False, "error": str(e)}
+
+
 def _execute_tool(name: str, args: dict) -> str:
     try:
         log.info("Tool called: %s | args: %s", name, args)
@@ -402,6 +547,12 @@ def _execute_tool(name: str, args: dict) -> str:
                 logo_url=args.get("logoUrl"),
                 logos=args.get("logos") or None,
             )
+        elif name == "add_process_infographic":
+            r = _execute_add_process_infographic(args)
+        elif name == "add_grid_infographic":
+            r = _execute_add_grid_infographic(args)
+        elif name == "add_circular_process_infographic":
+            r = _execute_add_circular_process_infographic(args)
         else:
             return f"Unknown tool: {name}"
         out = json.dumps(r, indent=2) if isinstance(r, dict) else str(r)

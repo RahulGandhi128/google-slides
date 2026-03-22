@@ -112,6 +112,46 @@ def get_logo_image_url_by_role(role: str) -> str | None:
     return (small_data_url if small_data_url else None) or None
 
 
+def get_logo_url_for_scaffold(role: str, base_url: str | None) -> str | None:
+    """
+    Return best URL for scaffold: logo_url if set, else base_url + /api/branding/logo/{role}/image
+    when base_url is set and we have png_bytes, else small_data_url.
+    Use base_url when running behind a tunnel (localtunnel/ngrok) so Google can fetch logos.
+    """
+    role = (role or "").strip().lower()
+    if role not in ("my", "target"):
+        return None
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT logo_url, small_data_url, png_bytes FROM branding_logos WHERE role = :role"),
+            {"role": role},
+        ).fetchone()
+    if not row:
+        return None
+    logo_url, small_data_url, png_bytes = row[0], row[1], row[2]
+    if logo_url and isinstance(logo_url, str) and logo_url.strip():
+        return logo_url.strip()
+    base = (base_url or "").strip().rstrip("/")
+    if base and png_bytes and len(png_bytes) > 0:
+        return f"{base}/api/branding/logo/{role}/image"
+    return (small_data_url if small_data_url else None) or None
+
+
+def get_logo_png_bytes(role: str) -> bytes | None:
+    """Return raw PNG bytes for logo (for serving via HTTP)."""
+    role = (role or "").strip().lower()
+    if role not in ("my", "target"):
+        return None
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT png_bytes FROM branding_logos WHERE role = :role"),
+            {"role": role},
+        ).fetchone()
+    if not row or not row[0]:
+        return None
+    return row[0]
+
+
 def upsert_logo_url(role: str, url: str) -> dict[str, Any]:
     """Store a public logo URL for the role (no upload). Use for createImage in scaffold."""
     role = (role or "").strip().lower()

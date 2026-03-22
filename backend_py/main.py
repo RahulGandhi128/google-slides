@@ -40,6 +40,8 @@ from database.branding_logos import (
     upsert_logo_url as upsert_branding_logo_url,
     get_small_data_url_by_role,
     get_logo_image_url_by_role,
+    get_logo_url_for_scaffold,
+    get_logo_png_bytes,
     upsert_logo_prefs,
     get_logo_prefs,
 )
@@ -288,28 +290,74 @@ async def research_modify(request: dict):
         }
 
 
+def _text_from_text_content(text_obj: dict) -> str:
+    """Extract plain text from a TextContent object (shape.text or tableCell.text)."""
+    text_elements = (text_obj or {}).get("textElements") or []
+    chunk = []
+    for te in text_elements:
+        run = te.get("textRun") or {}
+        content = (run.get("content") or "").strip()
+        if content:
+            chunk.append(content)
+    return " ".join(chunk).strip()
+
+
+def _extract_text_from_element(el: dict) -> str | None:
+    """Extract text from a single page element (shape, table, wordArt). Returns None if no text."""
+    # Shape (including nested shapes inside groups)
+    shape = el.get("shape") or {}
+    text = _text_from_text_content(shape.get("text"))
+    if text:
+        return text
+    # Table: iterate rows and cells
+    table = el.get("table") or {}
+    table_parts = []
+    for row in table.get("tableRows") or []:
+        row_parts = []
+        for cell in row.get("tableCells") or []:
+            ct = _text_from_text_content(cell.get("text"))
+            if ct:
+                row_parts.append(ct)
+        if row_parts:
+            table_parts.append(" | ".join(row_parts))
+    if table_parts:
+        return "\n".join(table_parts)
+    # WordArt
+    word_art = el.get("wordArt") or {}
+    wa_text = (word_art.get("renderedText") or "").strip()
+    if wa_text:
+        return wa_text
+    return None
+
+
+def _collect_text_from_elements(elements: list[dict]) -> list[str]:
+    """Recursively collect text from page elements (shapes, groups, tables, wordArt)."""
+    texts = []
+    for el in elements or []:
+        # Group: recurse into children
+        group = el.get("elementGroup") or {}
+        children = group.get("children") or []
+        if children:
+            texts.extend(_collect_text_from_elements(children))
+            continue
+        t = _extract_text_from_element(el)
+        if t:
+            texts.append(t)
+    return texts
+
+
 def _extract_slide_text(slide: dict) -> tuple[str, str]:
-    """Extract title and body text from a slide's pageElements. Returns (title, body)."""
+    """Extract title and body text from a slide's pageElements. Returns (title, body).
+    Handles shapes, groups (recursive), tables, and WordArt."""
     title_parts = []
     body_parts = []
     elements = slide.get("pageElements") or []
-    for el in elements:
-        shape = el.get("shape") or {}
-        text_obj = shape.get("text") or {}
-        text_elements = text_obj.get("textElements") or []
-        chunk = []
-        for te in text_elements:
-            run = te.get("textRun") or {}
-            content = (run.get("content") or "").strip()
-            if content:
-                chunk.append(content)
-        if not chunk:
-            continue
-        text = " ".join(chunk).strip()
+    all_texts = _collect_text_from_elements(elements)
+    for text in all_texts:
         if not text:
             continue
         # First text box treated as title if we don't have one yet; else body
-        if not title_parts and (shape.get("shapeType") == "TEXT_BOX" or True):
+        if not title_parts:
             first_line = text.split("\n")[0].strip() if "\n" in text else text
             if first_line and len(first_line) < 200:
                 title_parts.append(first_line)
@@ -415,6 +463,7 @@ async def execute_plan(request: dict):
         if design_instruction:
             plan_text += design_instruction.strip() + "\n\n"
         plan_text += "Slides to update (match by slide number / order):\n"
+        plan_text += "IMPORTANT: For elements with type process_infographic, grid_infographic, or circular_process_infographic, call the matching add_*_infographic tool—do NOT build them manually with createShape.\n\n"
     else:
         # Deterministically scaffold a new presentation (theme + logos) BEFORE calling the agent,
         # so the LLM never has to handle data URLs and can't forget to add logos.
@@ -435,10 +484,11 @@ async def execute_plan(request: dict):
         logos = []
         add_logos = logo_overrides.get("addLogosToSlides", False)
         if add_logos:
-            my_url = get_logo_image_url_by_role("my")
+            base_url = os.environ.get("ICON_BASE_URL", "").strip().rstrip("/")
+            my_url = get_logo_url_for_scaffold("my", base_url) if base_url else get_logo_image_url_by_role("my")
             if my_url:
                 logos.append({"url": my_url, "corner": my_corner, "idPrefix": "logo_my", "widthEmu": int(my_w), "heightEmu": int(my_h), "marginEmu": int(my_m)})
-            tgt_url = get_logo_image_url_by_role("target")
+            tgt_url = get_logo_url_for_scaffold("target", base_url) if base_url else get_logo_image_url_by_role("target")
             if tgt_url:
                 logos.append({"url": tgt_url, "corner": target_corner, "idPrefix": "logo_target", "widthEmu": int(tgt_w), "heightEmu": int(tgt_h), "marginEmu": int(tgt_m)})
 
@@ -471,6 +521,7 @@ async def execute_plan(request: dict):
         if design_instruction:
             plan_text += design_instruction.strip() + "\n\n"
         plan_text += "Slides to update (match by slide number / order):\n"
+        plan_text += "IMPORTANT: For elements with type process_infographic, grid_infographic, or circular_process_infographic, call the matching add_*_infographic tool—do NOT build them manually with createShape.\n\n"
 
     for s in slides:
         plan_text += f"\n--- Slide {s.get('slide_number', '?')}: {s.get('title', '')} ---\n"
@@ -699,6 +750,21 @@ async def branding_logos_upload(
     return {"ok": True, "logo": meta, "dataUrlLength": len(data_url)}
 
 
+@app.get("/api/branding/logo/{role}/image")
+async def branding_logo_image(role: str):
+    """
+    Serve logo PNG by role (my/target). Used when ICON_BASE_URL/tunnel is set
+    so Google Slides can fetch logos via public URL instead of data URL.
+    """
+    role = (role or "").strip().lower()
+    if role not in ("my", "target"):
+        raise HTTPException(status_code=400, detail="role must be 'my' or 'target'")
+    png_bytes = get_logo_png_bytes(role)
+    if not png_bytes:
+        raise HTTPException(status_code=404, detail=f"No logo uploaded for role '{role}'")
+    return Response(content=png_bytes, media_type="image/png")
+
+
 @app.post("/api/branding/logos/url")
 async def branding_logos_set_url(request: dict):
     """Set a logo by public URL (no upload). Role: 'my' or 'target'."""
@@ -776,14 +842,14 @@ async def health():
 @app.get("/api/icon/png")
 async def get_icon_png(name: str):
     """
-    Serve icon as PNG by name. Used by add_icon_to_slide when data URL exceeds 2KB.
-    Requires ICON_BASE_URL to be set to a publicly reachable URL (e.g. ngrok) for Google to fetch.
+    Serve icon as full-quality PNG by name. Used by add_icon_to_slide via ICON_BASE_URL (tunnel).
+    Requires ICON_BASE_URL to be set to a publicly reachable URL (e.g. localtunnel/ngrok) for Google to fetch.
     """
     icon = get_icon_by_name(name)
     if not icon or not icon.get("svg"):
         raise HTTPException(status_code=404, detail=f"Icon '{name}' not found")
     try:
-        png_bytes = svg_to_png_bytes(icon["svg"], output_width=128, output_height=128)
+        png_bytes = svg_to_png_bytes(icon["svg"], output_width=256, output_height=256)
         return Response(content=png_bytes, media_type="image/png")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

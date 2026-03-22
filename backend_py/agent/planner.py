@@ -50,6 +50,18 @@ LAYOUT VARIETY (do not use "title + bullets" on every slide):
 - Not every slide should be "title centered + bullet list below". Include at least 2–3 different layout types in the deck (e.g. split, columns, accent bar, grid).
 - "layout" and "details" should describe the actual visual structure (e.g. "Two columns: left column 3 stat cards, right column key message"; "Split: title top, image left 50%, body text right 50%").
 
+PREBUILT INFOGRAPHICS (prefer these over manual shapes when content fits):
+- process_infographic: Use for workflows, pipelines, step sequences (3–6 steps). Content: ordered list of step labels. Add when document has "steps", "phases", "stages", "pipeline", "flow", "process" with sequential items.
+- grid_infographic: Use for stat cards, feature comparisons, 2x2 or 2x3 or 3x2 matrices (2–6 cells). Add when document has side-by-side comparisons, statistics, feature lists that fit a grid.
+- circular_process_infographic: Use for cycles, recurring processes, 4–6 phases in a loop. Add when document describes "cycle", "loop", "phases", "recurring" with circular relationship.
+When adding an infographic element, set layout and details to mention it explicitly (e.g. "Layout: Process flow infographic for 4 steps; title above." or "Details: Use add_process_infographic for the workflow; add_grid_infographic 2x2 for the comparison matrix.").
+
+SHAPES (use individual shapes when):
+- Decorative accent bar or strip above/below title: use shape type "rectangle" with thin height for a colored band.
+- Background panel behind content: use shape type "rectangle" or "round_rectangle" as a card/container.
+- Single callout or highlight: use shape for one box, not a full infographic.
+- When content does NOT fit process/grid/circular (e.g. freeform, single stat, custom layout): use shape or text_box instead.
+
 WHEN PRODUCING A PLAN:
 - Output exactly one JSON object (no markdown, no code fence, no other text before or after).
 - Your job is slide design only: define title, slides, layout, text content, and element positions. Do not generate images, fetch URLs, or do anything beyond describing what goes on each slide.
@@ -109,7 +121,10 @@ Element types:
 - text_box: left_emu, top_emu, width_emu, height_emu (numbers), content (string). Optional: font_size (number, PT). Use font_size 24 or 28 for titles, 14 or 16 for body—consistently.
 - icon: left_emu, top_emu, width_emu, height_emu, query (e.g. "chart", "people"). Add only where an icon adds value.
 - image: left_emu, top_emu, width_emu, height_emu, image_description (string). Use to reserve space for an image; describe what should go there. Do not generate or fetch images—only leave the slot.
-- shape: left_emu, top_emu, width_emu, height_emu, shape_type (e.g. "rectangle"), optional fill.
+- shape: left_emu, top_emu, width_emu, height_emu, shape_type (e.g. "rectangle", "round_rectangle"). Use for accent bars, background panels, single decorative elements. Optional: fill (hex).
+- process_infographic: steps (array of strings, 3–6 items), optional orientation ("horizontal"|"vertical"), optional translateX, translateY. Use for workflows, pipelines, step sequences. The builder will call add_process_infographic.
+- grid_infographic: rows, columns, cells (array of strings, row-major), optional translateX, translateY. Use for stat cards, feature matrices, 2x2 or 2x3 grids. The builder will call add_grid_infographic.
+- circular_process_infographic: steps (array of strings, 4–6 items), optional arrowCount, optional translateX, translateY. Use for cycles, phases, recurring processes. The builder will call add_circular_process_infographic.
 
 Requirements:
 - For each slide: "layout", "details", "content", and "elements" with exact coordinates.
@@ -120,7 +135,9 @@ Requirements:
   - left_emu ≥ margin_emu, top_emu ≥ margin_emu
   - left_emu + width_emu ≤ pageWidthEmu - margin_emu
   - top_emu + height_emu ≤ pageHeightEmu - margin_emu
-- Order elements: background shape first, then text, then icons, then image placeholders.
+- Order elements: background shape first, then text, then infographics, then icons, then image placeholders.
+- When document content is a workflow (3–6 steps), comparison grid (2–6 items), or cycle (4–6 phases), add the matching infographic element. This produces professional grouped designs; do not manually create boxes+arrows for these cases.
+- For infographic elements, translateX/translateY are optional (tools center by default); include them only to override position.
 - Include theme and theme_colors (all six keys) in aesthetics.
 - Output only the JSON object, no other text before or after."""
 
@@ -277,10 +294,14 @@ def generate_plan(
                 if not isinstance(el, dict):
                     s["elements"][j] = {"type": "text_box", "left": 72, "top": 80, "width": 400, "height": 40, "content": ""}
                 else:
-                    el.setdefault("left", 72)
-                    el.setdefault("top", 80)
-                    el.setdefault("width", 200)
-                    el.setdefault("height", 40)
+                    etype = el.get("type", "text_box")
+                    if etype in ("process_infographic", "grid_infographic", "circular_process_infographic"):
+                        pass  # No left/top/width/height; infographics use steps/cells/rows/columns
+                    else:
+                        el.setdefault("left", 72)
+                        el.setdefault("top", 80)
+                        el.setdefault("width", 200)
+                        el.setdefault("height", 40)
             # Keep legacy fields for backward compatibility
             s.setdefault("icons", [])
             s.setdefault("theme_note", None)

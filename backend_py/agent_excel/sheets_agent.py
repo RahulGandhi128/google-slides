@@ -229,7 +229,7 @@ def _execute_sheets_tool(name: str, args: dict, default_spreadsheet_id: str | No
             if args.get("valueRenderOption"):
                 params["valueRenderOption"] = args["valueRenderOption"]
             r = run_gws(
-                ["sheets", "spreadsheets.values", "get"],
+                ["sheets", "spreadsheets", "values", "get"],
                 params=params,
             )
             return json.dumps(r, indent=2) if isinstance(r, dict) else str(r)
@@ -256,23 +256,11 @@ def _execute_sheets_tool(name: str, args: dict, default_spreadsheet_id: str | No
                             # Normalize bools to strings to avoid schema mismatch.
                             values[r_idx][c_idx] = str(cell) if isinstance(cell, bool) else cell
             value_body = {"values": values}
-            try:
-                r = run_gws(
-                    ["sheets", "spreadsheets.values", "update"],
-                    params=params,
-                    json_body=value_body,
-                )
-            except RuntimeError as e:
-                # gws subcommand naming can vary by CLI generation; retry alternate form.
-                msg = str(e).lower()
-                if "unrecognized subcommand" in msg or "unknown command" in msg:
-                    r = run_gws(
-                        ["sheets", "spreadsheets", "values", "update"],
-                        params=params,
-                        json_body=value_body,
-                    )
-                else:
-                    raise
+            r = run_gws(
+                ["sheets", "spreadsheets", "values", "update"],
+                params=params,
+                json_body=value_body,
+            )
             log.info("Sheets values.update response type=%s", type(r).__name__)
             return json.dumps(r, indent=2) if isinstance(r, dict) else str(r)
 
@@ -297,22 +285,11 @@ def _execute_sheets_tool(name: str, args: dict, default_spreadsheet_id: str | No
                         else:
                             values[r_idx][c_idx] = str(cell) if isinstance(cell, bool) else cell
             value_body = {"values": values}
-            try:
-                r = run_gws(
-                    ["sheets", "spreadsheets.values", "append"],
-                    params=params,
-                    json_body=value_body,
-                )
-            except RuntimeError as e:
-                msg = str(e).lower()
-                if "unrecognized subcommand" in msg or "unknown command" in msg:
-                    r = run_gws(
-                        ["sheets", "spreadsheets", "values", "append"],
-                        params=params,
-                        json_body=value_body,
-                    )
-                else:
-                    raise
+            r = run_gws(
+                ["sheets", "spreadsheets", "values", "append"],
+                params=params,
+                json_body=value_body,
+            )
             log.info("Sheets values.append response type=%s", type(r).__name__)
             return json.dumps(r, indent=2) if isinstance(r, dict) else str(r)
 
@@ -403,7 +380,7 @@ def run_sheets_agent(
 
     chat = model.start_chat(history=history)
     tool_calls_made: list[dict[str, Any]] = []
-    max_rounds = int(os.environ.get("SHEETS_AGENT_MAX_ROUNDS") or os.environ.get("AGENT_MAX_ROUNDS", "20"))
+    max_rounds = int(os.environ.get("SHEETS_AGENT_MAX_ROUNDS") or os.environ.get("AGENT_MAX_ROUNDS", "40"))
 
     try:
         response = chat.send_message(user_content)
