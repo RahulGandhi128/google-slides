@@ -84,3 +84,14 @@ def upsert_template(name: str, slides: list[dict[str, Any]]) -> None:
       )
       conn.commit()
 
+
+def delete_template(template_id: int) -> bool:
+    """Delete a slide template by id. Returns True if deleted."""
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("DELETE FROM slide_templates WHERE id = :id"),
+            {"id": template_id},
+        )
+        conn.commit()
+        return result.rowcount > 0
+

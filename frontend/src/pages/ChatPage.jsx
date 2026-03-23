@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import { getColor, getPalette } from 'colorthief';
@@ -300,8 +300,6 @@ function ChatPage() {
   const [mentionLoading, setMentionLoading] = useState(false);
   const [sessionMenuOpen, setSessionMenuOpen] = useState(null);
   const [deletingSessionId, setDeletingSessionId] = useState(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState('research');
   const [presentationTypeMenuOpen, setPresentationTypeMenuOpen] = useState(false);
   const [slideOutlineDialogOpen, setSlideOutlineDialogOpen] = useState(false);
   const [slideOutlineName, setSlideOutlineName] = useState('');
@@ -310,6 +308,10 @@ function ChatPage() {
   ]);
   const [savedSlideOutlines, setSavedSlideOutlines] = useState([]);
   const [selectedSlideOutline, setSelectedSlideOutline] = useState(null);
+  const [editingSlideOutlineId, setEditingSlideOutlineId] = useState(null);
+  const [loadedSlideOutlineSnapshot, setLoadedSlideOutlineSnapshot] = useState(null);
+  const [deletingSlideOutlineId, setDeletingSlideOutlineId] = useState(null);
+  const [slideOutlineSaveStatus, setSlideOutlineSaveStatus] = useState(null);
   const [designOutlineDialogOpen, setDesignOutlineDialogOpen] = useState(false);
   const [designOutlineDialogContent, setDesignOutlineDialogContent] = useState('');
   const [designOutlineDialogMessageIndex, setDesignOutlineDialogMessageIndex] = useState(null);
@@ -336,55 +338,27 @@ function ChatPage() {
   const [findReplacementsLoading, setFindReplacementsLoading] = useState(false);
   const [fileCardPickerOpen, setFileCardPickerOpen] = useState(false);
   const fileCardPickerRef = useRef(null);
-  const [settingsEnabled, setSettingsEnabled] = useState(() => {
+  /** Research mode: strict verbatim-from-source (default on). */
+  const [groundResponseEnabled, setGroundResponseEnabled] = useState(() => {
     try {
-      const v = localStorage.getItem('app_settings_enabled');
-      return v !== 'false';
-    } catch { return true; }
+      const v = localStorage.getItem('research_ground_response');
+      if (v === null) return true;
+      return v === 'true';
+    } catch {
+      return true;
+    }
   });
-  const [settings, setSettings] = useState(() => {
+  const persistGroundResponse = (value) => {
+    setGroundResponseEnabled(value);
     try {
-      return JSON.parse(localStorage.getItem('app_settings') || '{}');
-    } catch { return {}; }
-  });
-  const researchSettings = {
-    groundResponse: false,
-    slideStructure: false,
-    ...settings.research,
+      localStorage.setItem('research_ground_response', String(value));
+    } catch (_) {}
   };
+  /** Defaults for plan/execute (previously editable in Settings). */
   const designSettings = {
     style: 'minimalist_bw',
     maxLinesPerSlide: 5,
     printable: false,
-    ...settings.design,
-  };
-  const brandingSettings = {
-    companyName: '',
-    brandColor: '#000000',
-    logoOnAllSlides: false,
-    logoUploaded: false,
-    ...settings.branding,
-  };
-  const updateResearchSettings = (next) => {
-    setSettings((s) => {
-      const out = { ...s, research: { ...researchSettings, ...next } };
-      try { localStorage.setItem('app_settings', JSON.stringify(out)); } catch (_) {}
-      return out;
-    });
-  };
-  const updateDesignSettings = (next) => {
-    setSettings((s) => {
-      const out = { ...s, design: { ...designSettings, ...next } };
-      try { localStorage.setItem('app_settings', JSON.stringify(out)); } catch (_) {}
-      return out;
-    });
-  };
-  const updateBrandingSettings = (next) => {
-    setSettings((s) => {
-      const out = { ...s, branding: { ...brandingSettings, ...next } };
-      try { localStorage.setItem('app_settings', JSON.stringify(out)); } catch (_) {}
-      return out;
-    });
   };
   const sessionMenuRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -429,13 +403,6 @@ function ChatPage() {
   useEffect(() => {
     fetchChatSessions();
   }, []);
-
-  const setSettingsEnabledAndPersist = (value) => {
-    setSettingsEnabled(value);
-    try {
-      localStorage.setItem('app_settings_enabled', String(value));
-    } catch (_) {}
-  };
 
   const loadSession = async (id) => {
     try {
@@ -497,9 +464,11 @@ function ChatPage() {
   };
 
   const selectMentionDoc = (doc) => {
-    const beforeAt = input.slice(0, inputRef.current?.selectionStart ?? input.length).replace(/@[^\s]*$/, '');
-    const afterAt = input.slice(inputRef.current?.selectionStart ?? input.length);
-    setInput(`${beforeAt}@${doc.filename} ${afterAt}`.trim());
+    const caret = inputRef.current?.selectionStart ?? input.length;
+    const beforeAt = input.slice(0, caret).replace(/@[^\s]*$/, '');
+    const afterAt = input.slice(caret);
+    // Keep only the attachment card in UI; do not inject @filename text in textarea.
+    setInput(`${beforeAt}${afterAt}`.replace(/\s{2,}/g, ' ').trimStart());
     setAttachedDocuments((prev) => {
       if (prev.some((d) => d.upload_id === doc.upload_id)) return prev;
       return [...prev, { upload_id: doc.upload_id, filename: doc.filename }];
@@ -889,9 +858,6 @@ function ChatPage() {
           palette: designOutlineExtracted.palette.map((c) => c.hex),
         }
       : null;
-    if (designOutlineExtracted?.dominant?.hex) {
-      updateBrandingSettings({ brandColor: designOutlineExtracted.dominant.hex });
-    }
     setDesignOutlineSavingBranding(true);
     try {
       await saveBrandingLogosAndPrefs();
@@ -1019,13 +985,11 @@ function ChatPage() {
               palette: colorPalette.palette || [],
             },
           }),
-          ...(settingsEnabled && {
-            designSettings: {
-              style: designSettings.style,
-              maxLinesPerSlide: designSettings.maxLinesPerSlide,
-              printable: designSettings.printable,
-            },
-          }),
+          designSettings: {
+            style: designSettings.style,
+            maxLinesPerSlide: designSettings.maxLinesPerSlide,
+            printable: designSettings.printable,
+          },
         }),
       });
       const data = await res.json();
@@ -1059,10 +1023,63 @@ function ChatPage() {
     }
   };
 
+  const _normalizeSlidesForCompare = (slides) =>
+    (slides || [])
+      .map((s) => ({ title: (s.title || '').trim(), guidance: (s.guidance || '').trim() }))
+      .filter((s) => s.title || s.guidance);
+
+  const isSlideOutlineDirty = useMemo(() => {
+    const normalized = _normalizeSlidesForCompare(slideOutlineSlides);
+    const nameTrim = slideOutlineName.trim();
+    if (!loadedSlideOutlineSnapshot) {
+      return !!nameTrim || normalized.length > 0;
+    }
+    const snapNorm = _normalizeSlidesForCompare(loadedSlideOutlineSnapshot.slides);
+    if (nameTrim !== (loadedSlideOutlineSnapshot.name || '').trim()) return true;
+    if (normalized.length !== snapNorm.length) return true;
+    return normalized.some((s, i) => s.title !== snapNorm[i]?.title || s.guidance !== snapNorm[i]?.guidance);
+  }, [slideOutlineName, slideOutlineSlides, loadedSlideOutlineSnapshot]);
+
   const handleOpenSlideOutlineDialog = () => {
     setSlideOutlineName('');
     setSlideOutlineSlides([{ title: '', guidance: '' }]);
+    setEditingSlideOutlineId(null);
+    setLoadedSlideOutlineSnapshot(null);
+    setSlideOutlineSaveStatus(null);
     setSlideOutlineDialogOpen(true);
+  };
+
+  const handleSelectSlideOutline = (outline) => {
+    setSlideOutlineName(outline.name || '');
+    setSlideOutlineSlides(
+      (outline.slides || []).length > 0
+        ? outline.slides.map((s) => ({ title: s.title || '', guidance: s.guidance || '' }))
+        : [{ title: '', guidance: '' }]
+    );
+    setEditingSlideOutlineId(outline.id);
+    setLoadedSlideOutlineSnapshot({ name: outline.name, slides: outline.slides || [] });
+    setSlideOutlineSaveStatus(null);
+  };
+
+  const handleDeleteSlideOutline = async () => {
+    const outline = savedSlideOutlines.find((o) => o.id === editingSlideOutlineId);
+    if (!outline?.id || deletingSlideOutlineId) return;
+    if (!confirm(`Delete "${outline.name}"?`)) return;
+    setDeletingSlideOutlineId(outline.id);
+    try {
+      const res = await fetch(`${API_BASE}/slide-templates/${outline.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete');
+      await fetchSlideOutlines();
+      setSlideOutlineName('');
+      setSlideOutlineSlides([{ title: '', guidance: '' }]);
+      setEditingSlideOutlineId(null);
+      setLoadedSlideOutlineSnapshot(null);
+      setSlideOutlineSaveStatus(null);
+    } catch (err) {
+      alert(err.message || 'Failed to delete template');
+    } finally {
+      setDeletingSlideOutlineId(null);
+    }
   };
 
   const handleAddSlideRow = () => {
@@ -1083,51 +1100,35 @@ function ChatPage() {
 
   const handleSaveSlideOutline = () => {
     const name = slideOutlineName.trim();
-    const slides = slideOutlineSlides
-      .map((s) => ({
-        title: (s.title || '').trim(),
-        guidance: (s.guidance || '').trim(),
-      }))
-      .filter((s) => s.title || s.guidance);
+    const slides = _normalizeSlidesForCompare(slideOutlineSlides);
     if (!name || slides.length === 0) {
       alert('Add a name and at least one slide with title or guidance.');
       return;
     }
-    const save = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/slide-templates`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, slides }),
-        });
+    setSlideOutlineSaveStatus('saving');
+    fetch(`${API_BASE}/slide-templates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, slides }),
+    })
+      .then(async (res) => {
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.detail || 'Failed to save template');
         }
         await fetchSlideOutlines();
-        setSlideOutlineDialogOpen(false);
-      } catch (err) {
+        setLoadedSlideOutlineSnapshot({ name, slides });
+        setSlideOutlineSaveStatus('saved');
+        setTimeout(() => setSlideOutlineSaveStatus(null), 2000);
+      })
+      .catch((err) => {
+        setSlideOutlineSaveStatus(null);
         alert(err.message || 'Failed to save template');
-      }
-    };
-    save();
+      });
   };
 
   const handleSelectPresentationType = (outline) => {
     if (!outline) return;
-    const outlineText = [
-      `Presentation type: ${outline.name}`,
-      '',
-      ...outline.slides.map(
-        (s, idx) =>
-          `${idx + 1}. ${s.title || 'Slide'}${
-            s.guidance ? ` — ${s.guidance}` : ''
-          }`
-      ),
-    ].join('\n');
-    setInput((prev) =>
-      prev.trim() ? `${prev}\n\n${outlineText}` : outlineText
-    );
     setSelectedSlideOutline(outline);
     setPresentationTypeMenuOpen(false);
     setTimeout(() => inputRef.current?.focus(), 0);
@@ -1183,13 +1184,11 @@ function ChatPage() {
           modifyExisting: buildMode === 'modify',
           currentFile: selectedFile ? { id: selectedFile.id, name: selectedFile.name, mimeType: selectedFile.mimeType } : null,
           ...(logoOverrides && { logoOverrides }),
-          ...(settingsEnabled && {
-            designSettings: {
-              style: designSettings.style,
-              maxLinesPerSlide: designSettings.maxLinesPerSlide,
-              printable: designSettings.printable,
-            },
-          }),
+          designSettings: {
+            style: designSettings.style,
+            maxLinesPerSlide: designSettings.maxLinesPerSlide,
+            printable: designSettings.printable,
+          },
         }),
       });
       const data = await res.json();
@@ -1229,7 +1228,22 @@ function ChatPage() {
   };
 
   const sendMessage = async () => {
-    const text = input.trim();
+    const baseText = input.trim();
+    const presentationTypeText = selectedSlideOutline
+      ? [
+          `Presentation type: ${selectedSlideOutline.name}`,
+          '',
+          ...(selectedSlideOutline.slides || []).map(
+            (s, idx) =>
+              `${idx + 1}. ${s.title || 'Slide'}${
+                s.guidance ? ` — ${s.guidance}` : ''
+              }`
+          ),
+        ].join('\n')
+      : '';
+    const text = presentationTypeText
+      ? (baseText ? `${baseText}\n\n${presentationTypeText}` : presentationTypeText)
+      : baseText;
     if (!text || isLoading) return;
 
     const documents = attachedDocuments.map((d) => ({ upload_id: d.upload_id, filename: d.filename || '' }));
@@ -1253,13 +1267,11 @@ function ChatPage() {
             ...(buildMode === 'modify' && selectedFile && {
               currentFile: { id: selectedFile.id, name: selectedFile.name, mimeType: selectedFile.mimeType },
             }),
-            ...(settingsEnabled && {
-              designSettings: {
-                style: designSettings.style,
-                maxLinesPerSlide: designSettings.maxLinesPerSlide,
-                printable: designSettings.printable,
-              },
-            }),
+            designSettings: {
+              style: designSettings.style,
+              maxLinesPerSlide: designSettings.maxLinesPerSlide,
+              printable: designSettings.printable,
+            },
           }),
         });
         const data = await res.json();
@@ -1284,7 +1296,7 @@ function ChatPage() {
             query: text,
             documents,
             sessionId,
-            groundResponse: settingsEnabled ? researchSettings.groundResponse : false,
+            groundResponse: groundResponseEnabled,
             ...(selectedSlideOutline && {
               slideTemplate: {
                 name: selectedSlideOutline.name,
@@ -1387,28 +1399,6 @@ function ChatPage() {
           <Link to="/" className="chat-sidebar-logo" title="Home">
             <span className="logo-icon">G</span>
           </Link>
-          <div className="chat-sidebar-settings-row">
-            <button
-              type="button"
-              className="chat-sidebar-settings-btn"
-              onClick={() => setSettingsOpen(true)}
-              title="Settings"
-              aria-label="Settings"
-            >
-              ⚙ Settings
-            </button>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={settingsEnabled}
-              aria-label={settingsEnabled ? 'Settings applied' : 'Settings off'}
-              title={settingsEnabled ? 'Settings are applied' : 'Settings are off — click to apply'}
-              className={`chat-sidebar-settings-toggle ${settingsEnabled ? 'on' : 'off'}`}
-              onClick={() => setSettingsEnabledAndPersist(!settingsEnabled)}
-            >
-              <span className="chat-sidebar-settings-toggle-slider" />
-            </button>
-          </div>
           <div className="chat-sidebar-header">
             <h3>Chat history</h3>
           </div>
@@ -1801,10 +1791,28 @@ function ChatPage() {
           </div>
         )}
         <div className="input-inbox">
-          {(attachedDocuments.length > 0 || uploadingDoc) && (
+          {(attachedDocuments.length > 0 || uploadingDoc || selectedSlideOutline) && (
             <div className="input-attached-wrap">
               {uploadingDoc && (
                 <span className="input-attached-label">Uploading…</span>
+              )}
+              {selectedSlideOutline && (
+                <div className="input-attached input-attached-outline">
+                  <span
+                    className="input-attached-label"
+                    title={`Presentation type: ${selectedSlideOutline.name}`}
+                  >
+                    {`Presentation type: ${selectedSlideOutline.name}`}
+                  </span>
+                  <button
+                    type="button"
+                    className="input-attached-remove"
+                    onClick={() => setSelectedSlideOutline(null)}
+                    aria-label="Remove presentation type"
+                  >
+                    ×
+                  </button>
+                </div>
               )}
               {attachedDocuments.map((doc, idx) => (
                 <div key={doc.upload_id} className="input-attached">
@@ -1880,6 +1888,31 @@ function ChatPage() {
               >
                 Slide outline
               </button>
+              {chatMode === 'research' && (
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={groundResponseEnabled}
+                  aria-label={
+                    groundResponseEnabled
+                      ? 'Ground response on: use source text verbatim'
+                      : 'Ground response off'
+                  }
+                  className={`ground-response-toggle ${groundResponseEnabled ? 'on' : 'off'}`}
+                  onClick={() => persistGroundResponse(!groundResponseEnabled)}
+                  disabled={isLoading}
+                  title={
+                    groundResponseEnabled
+                      ? 'Ground response on: answer using source wording as-is (no paraphrase)'
+                      : 'Ground response off: the model may paraphrase or rephrase'
+                  }
+                >
+                  <span className="ground-response-toggle-track" aria-hidden>
+                    <span className="ground-response-toggle-knob" />
+                  </span>
+                  <span className="ground-response-toggle-label">Ground response</span>
+                </button>
+              )}
               {selectedFile && (
                 <button
                   type="button"
@@ -1906,7 +1939,7 @@ function ChatPage() {
             <button
               className="send-btn"
               onClick={sendMessage}
-              disabled={!input.trim() || isLoading}
+              disabled={(!input.trim() && !selectedSlideOutline) || isLoading}
               aria-label="Send"
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1918,197 +1951,6 @@ function ChatPage() {
           </div>
         </main>
       </div>
-      {settingsOpen && (
-        <div className="settings-overlay" onClick={() => setSettingsOpen(false)}>
-          <div className="settings-dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="settings-dialog-header">
-              <h3>Settings</h3>
-              <button
-                type="button"
-                className="settings-dialog-close"
-                onClick={() => setSettingsOpen(false)}
-                aria-label="Close"
-              >
-                ×
-              </button>
-            </div>
-            <div className="settings-tabs">
-              <button
-                type="button"
-                className={`settings-tab ${settingsTab === 'research' ? 'active' : ''}`}
-                onClick={() => setSettingsTab('research')}
-              >
-                Research
-              </button>
-              <button
-                type="button"
-                className={`settings-tab ${settingsTab === 'design' ? 'active' : ''}`}
-                onClick={() => setSettingsTab('design')}
-              >
-                Design
-              </button>
-              <button
-                type="button"
-                className={`settings-tab ${settingsTab === 'branding' ? 'active' : ''}`}
-                onClick={() => setSettingsTab('branding')}
-              >
-                Branding
-              </button>
-            </div>
-            <div className="settings-dialog-body">
-              {settingsTab === 'research' && (
-                <>
-                  <div className="settings-toggle-row">
-                    <label htmlFor="ground-response-toggle" className="settings-toggle-label">
-                      Ground response
-                    </label>
-                    <button
-                      type="button"
-                      role="switch"
-                      id="ground-response-toggle"
-                      aria-checked={researchSettings.groundResponse}
-                      className={`settings-toggle ${researchSettings.groundResponse ? 'on' : 'off'}`}
-                      onClick={() => updateResearchSettings({ groundResponse: !researchSettings.groundResponse })}
-                    >
-                      <span className="settings-toggle-slider" />
-                    </button>
-                  </div>
-                  <p className="settings-toggle-desc">
-                    When on, the research agent uses exact text, language, and facts from the source documents without modifying them.
-                  </p>
-                  <div className="settings-toggle-row">
-                    <label htmlFor="slide-structure-toggle" className="settings-toggle-label">
-                      Include slide outline
-                    </label>
-                    <button
-                      type="button"
-                      role="switch"
-                      id="slide-structure-toggle"
-                      aria-checked={researchSettings.slideStructure}
-                      className={`settings-toggle ${researchSettings.slideStructure ? 'on' : 'off'}`}
-                      onClick={() => updateResearchSettings({ slideStructure: !researchSettings.slideStructure })}
-                    >
-                      <span className="settings-toggle-slider" />
-                    </button>
-                  </div>
-                  <p className="settings-toggle-desc">
-                    Structure response with section headings that map to slide titles (e.g. Overview, Key Metrics, Risks). (Coming soon)
-                  </p>
-                </>
-              )}
-              {settingsTab === 'design' && (
-                <>
-                  <div className="settings-field">
-                    <label htmlFor="design-style-select" className="settings-toggle-label">Design style</label>
-                    <select
-                      id="design-style-select"
-                      className="settings-select"
-                      value={designSettings.style}
-                      onChange={(e) => updateDesignSettings({ style: e.target.value })}
-                    >
-                      <option value="minimalist_bw">Minimalist B&amp;W</option>
-                      <option value="brand_colors">Brand colors</option>
-                      <option value="dark">Dark</option>
-                    </select>
-                    <p className="settings-toggle-desc">
-                      Minimalist: white background, black text. Brand: accent from branding. Dark: dark theme.
-                    </p>
-                  </div>
-                  <div className="settings-field">
-                    <label htmlFor="max-lines-select" className="settings-toggle-label">Max lines per slide</label>
-                    <select
-                      id="max-lines-select"
-                      className="settings-select"
-                      value={String(designSettings.maxLinesPerSlide)}
-                      onChange={(e) => updateDesignSettings({ maxLinesPerSlide: Number(e.target.value) })}
-                    >
-                      <option value="3">3</option>
-                      <option value="5">5</option>
-                      <option value="8">8</option>
-                    </select>
-                    <p className="settings-toggle-desc">
-                      Limit body text to at most this many lines per slide.
-                    </p>
-                  </div>
-                  <div className="settings-toggle-row">
-                    <label htmlFor="printable-toggle" className="settings-toggle-label">Printable</label>
-                    <button
-                      type="button"
-                      role="switch"
-                      id="printable-toggle"
-                      aria-checked={designSettings.printable}
-                      className={`settings-toggle ${designSettings.printable ? 'on' : 'off'}`}
-                      onClick={() => updateDesignSettings({ printable: !designSettings.printable })}
-                    >
-                      <span className="settings-toggle-slider" />
-                    </button>
-                  </div>
-                  <p className="settings-toggle-desc">
-                    White backgrounds, black text, no gradients. Legible in grayscale print.
-                  </p>
-                </>
-              )}
-              {settingsTab === 'branding' && (
-                <>
-                  <div className="settings-field">
-                    <label htmlFor="company-name-input" className="settings-toggle-label">Company name</label>
-                    <input
-                      id="company-name-input"
-                      type="text"
-                      className="settings-input"
-                      placeholder="Your firm name"
-                      value={brandingSettings.companyName}
-                      onChange={(e) => updateBrandingSettings({ companyName: e.target.value })}
-                    />
-                    <p className="settings-toggle-desc">Used in plan prompt. (Coming soon)</p>
-                  </div>
-                  <div className="settings-field">
-                    <label htmlFor="brand-color-input" className="settings-toggle-label">Brand color</label>
-                    <div className="settings-color-row">
-                      <input
-                        id="brand-color-input"
-                        type="color"
-                        className="settings-color-picker"
-                        value={brandingSettings.brandColor}
-                        onChange={(e) => updateBrandingSettings({ brandColor: e.target.value })}
-                      />
-                      <input
-                        type="text"
-                        className="settings-input settings-color-hex"
-                        value={brandingSettings.brandColor}
-                        onChange={(e) => updateBrandingSettings({ brandColor: e.target.value })}
-                      />
-                    </div>
-                    <p className="settings-toggle-desc">Accent color for slides. (Coming soon)</p>
-                  </div>
-                  <div className="settings-field">
-                    <label className="settings-toggle-label">Company logo</label>
-                    <div className="settings-logo-upload">
-                      <input type="file" accept="image/png,.png" className="input-file-hidden" id="logo-upload" />
-                      <label htmlFor="logo-upload" className="settings-upload-btn">Choose PNG</label>
-                      <span className="settings-upload-hint">Logo for all slides. (Coming soon)</span>
-                    </div>
-                  </div>
-                  <div className="settings-toggle-row">
-                    <label htmlFor="logo-on-slides-toggle" className="settings-toggle-label">Add logo to all slides</label>
-                    <button
-                      type="button"
-                      role="switch"
-                      id="logo-on-slides-toggle"
-                      aria-checked={brandingSettings.logoOnAllSlides}
-                      className={`settings-toggle ${brandingSettings.logoOnAllSlides ? 'on' : 'off'}`}
-                      onClick={() => updateBrandingSettings({ logoOnAllSlides: !brandingSettings.logoOnAllSlides })}
-                    >
-                      <span className="settings-toggle-slider" />
-                    </button>
-                  </div>
-                  <p className="settings-toggle-desc">Insert firm logo on every slide. (Coming soon)</p>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
       {designOutlineDialogOpen && (
         <div
           className="settings-overlay"
@@ -2433,7 +2275,7 @@ function ChatPage() {
           onClick={() => setSlideOutlineDialogOpen(false)}
         >
           <div
-            className="settings-dialog"
+            className="settings-dialog slide-outline-dialog"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="settings-dialog-header">
@@ -2447,96 +2289,161 @@ function ChatPage() {
                 ×
               </button>
             </div>
-            <div className="settings-dialog-body">
-              <div className="settings-field">
-                <label
-                  htmlFor="slide-outline-name"
-                  className="settings-toggle-label"
+            <div className="settings-dialog-body slide-outline-dialog-body">
+              <div className="slide-outline-saved-list">
+                <div className="slide-outline-saved-header">Saved outlines</div>
+                <button
+                  type="button"
+                  className="slide-outline-new-btn"
+                  onClick={() => {
+                    setSlideOutlineName('');
+                    setSlideOutlineSlides([{ title: '', guidance: '' }]);
+                    setEditingSlideOutlineId(null);
+                    setLoadedSlideOutlineSnapshot(null);
+                    setSlideOutlineSaveStatus(null);
+                  }}
                 >
-                  Presentation name
-                </label>
-                <input
-                  id="slide-outline-name"
-                  type="text"
-                  className="settings-input"
-                  placeholder="e.g. Pitch, Investor presentation"
-                  value={slideOutlineName}
-                  onChange={(e) => setSlideOutlineName(e.target.value)}
-                />
+                  + New outline
+                </button>
+                {savedSlideOutlines.length === 0 ? (
+                  <div className="slide-outline-saved-empty">No saved outlines yet</div>
+                ) : (
+                  <ul className="slide-outline-saved-ul">
+                    {savedSlideOutlines.map((outline) => (
+                      <li
+                        key={outline.id}
+                        role="button"
+                        tabIndex={0}
+                        className={`slide-outline-saved-item ${editingSlideOutlineId === outline.id ? 'selected' : ''}`}
+                        onClick={() => handleSelectSlideOutline(outline)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleSelectSlideOutline(outline)}
+                      >
+                        <span className="slide-outline-saved-name" title={outline.name}>
+                          {outline.name}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
-              <div className="settings-field">
-                <div className="settings-toggle-label">
-                  Slides (title and guidance)
-                </div>
-                <div className="slide-outline-rows">
-                  {slideOutlineSlides.map((row, idx) => (
-                    <div
-                      key={idx}
-                      className="slide-outline-row"
+              <div className="slide-outline-form">
+                <div className="slide-outline-form-header">
+                  <h4 className="slide-outline-form-title">
+                    {editingSlideOutlineId ? 'Edit outline' : 'New outline'}
+                  </h4>
+                  {editingSlideOutlineId && (
+                    <button
+                      type="button"
+                      className="slide-outline-delete-btn-inline"
+                      onClick={handleDeleteSlideOutline}
+                      disabled={deletingSlideOutlineId === editingSlideOutlineId}
                     >
-                      <input
-                        type="text"
-                        className="settings-input slide-outline-title-input"
-                        placeholder={`Slide ${idx + 1} title`}
-                        value={row.title}
-                        onChange={(e) =>
-                          handleUpdateSlideRow(
-                            idx,
-                            'title',
-                            e.target.value,
-                          )
-                        }
-                      />
-                      <textarea
-                        className="settings-input slide-outline-guidance-input"
-                        placeholder="Guidance / what to fill in this slide"
-                        rows={2}
-                        value={row.guidance}
-                        onChange={(e) =>
-                          handleUpdateSlideRow(
-                            idx,
-                            'guidance',
-                            e.target.value,
-                          )
-                        }
-                      />
-                      {slideOutlineSlides.length > 1 && (
-                        <button
-                          type="button"
-                          className="slide-outline-remove-btn"
-                          onClick={() => handleRemoveSlideRow(idx)}
-                          aria-label="Remove slide"
-                        >
-                          ×
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    className="slide-outline-add-btn"
-                    onClick={handleAddSlideRow}
+                      {deletingSlideOutlineId === editingSlideOutlineId ? 'Deleting…' : 'Delete'}
+                    </button>
+                  )}
+                </div>
+                <div className="settings-field">
+                  <label
+                    htmlFor="slide-outline-name"
+                    className="settings-toggle-label"
                   >
-                    + Add slide
-                  </button>
+                    Presentation name
+                  </label>
+                  <input
+                    id="slide-outline-name"
+                    type="text"
+                    className="settings-input"
+                    placeholder="e.g. Pitch, Investor presentation"
+                    value={slideOutlineName}
+                    onChange={(e) => setSlideOutlineName(e.target.value)}
+                  />
+                </div>
+                <div className="settings-field">
+                  <div className="settings-toggle-label">
+                    Slides (title and guidance)
+                  </div>
+                  <div className="slide-outline-rows">
+                    {slideOutlineSlides.map((row, idx) => (
+                      <div
+                        key={idx}
+                        className="slide-outline-row"
+                      >
+                        <input
+                          type="text"
+                          className="settings-input slide-outline-title-input"
+                          placeholder={`Slide ${idx + 1} title`}
+                          value={row.title}
+                          onChange={(e) =>
+                            handleUpdateSlideRow(
+                              idx,
+                              'title',
+                              e.target.value,
+                            )
+                          }
+                        />
+                        <textarea
+                          className="settings-input slide-outline-guidance-input"
+                          placeholder="Guidance / what to fill in this slide"
+                          rows={2}
+                          value={row.guidance}
+                          onChange={(e) =>
+                            handleUpdateSlideRow(
+                              idx,
+                              'guidance',
+                              e.target.value,
+                            )
+                          }
+                        />
+                        {slideOutlineSlides.length > 1 && (
+                          <button
+                            type="button"
+                            className="slide-outline-remove-btn"
+                            onClick={() => handleRemoveSlideRow(idx)}
+                            aria-label="Remove slide"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      className="slide-outline-add-btn"
+                      onClick={handleAddSlideRow}
+                    >
+                      + Add slide
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
-            <div className="settings-dialog-footer">
-              <button
-                type="button"
-                className="settings-upload-btn"
-                onClick={handleSaveSlideOutline}
-              >
-                Save template
-              </button>
-              <button
-                type="button"
-                className="edit-outline-cancel-btn"
-                onClick={() => setSlideOutlineDialogOpen(false)}
-              >
-                Cancel
-              </button>
+            <div className="settings-dialog-footer slide-outline-footer">
+              {isSlideOutlineDirty && (
+                <span className="slide-outline-dirty-msg">
+                  {slideOutlineSaveStatus === 'saving'
+                    ? 'Saving…'
+                    : slideOutlineSaveStatus === 'saved'
+                      ? 'Saved'
+                      : 'Unsaved changes'}
+                </span>
+              )}
+              <div className="slide-outline-footer-actions">
+                <button
+                  type="button"
+                  className="settings-upload-btn"
+                  onClick={handleSaveSlideOutline}
+                  disabled={!isSlideOutlineDirty || slideOutlineSaveStatus === 'saving'}
+                >
+                  {slideOutlineSaveStatus === 'saving' ? 'Saving…' : 'Save'}
+                </button>
+                <button
+                  type="button"
+                  className="edit-outline-cancel-btn"
+                  onClick={() => setSlideOutlineDialogOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>

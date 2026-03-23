@@ -33,7 +33,11 @@ from gws import drive_files_list, presentations_get
 from database import init_db
 from database.drive_files import upsert_drive_files, get_drive_files_from_db
 from database.documents import ingest_document, list_documents as list_docs_db
-from database.slide_templates import list_templates as list_slide_templates, upsert_template as upsert_slide_template
+from database.slide_templates import (
+    list_templates as list_slide_templates,
+    upsert_template as upsert_slide_template,
+    delete_template as delete_slide_template,
+)
 from database.branding_logos import (
     list_logos as list_branding_logos,
     upsert_logo as upsert_branding_logo,
@@ -815,6 +819,14 @@ async def slide_templates_save(request: dict):
         return {"ok": True}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/slide-templates/{template_id:int}")
+async def slide_templates_delete(template_id: int):
+    """Delete a slide template by id."""
+    if not delete_slide_template(template_id):
+        raise HTTPException(status_code=404, detail="Template not found")
+    return {"ok": True}
 
 
 @app.get("/api/tools")

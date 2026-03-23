@@ -170,9 +170,17 @@ def _to_jsonable(obj):
 
 
 GROUND_RESPONSE_ADDON = (
-    "\n\n[[CRITICAL - GROUND RESPONSE MODE]] When using document_search results, you MUST use the exact text, "
-    "language, and facts from the retrieved chunks or source documents. Do NOT paraphrase, summarize, or modify "
-    "them. Quote or reproduce the source content faithfully."
+    "\n\n[[CRITICAL — GROUND RESPONSE MODE — HIGHEST PRIORITY]]\n"
+    "When answering from document_search results or any attached source text:\n"
+    "- Reproduce the source wording as-is. Do NOT paraphrase, summarize, translate, or \"improve\" the prose.\n"
+    "- Do NOT add adjectives, intensifiers, or editorial language that is not in the source.\n"
+    "- Do NOT change the language: if the source is in a given language, keep that exact language and script.\n"
+    "- Do NOT substitute synonyms or rephrase for style; copy sentences or clauses verbatim where a factual "
+    "statement is needed. You may use minimal connecting words only when stitching multiple verbatim fragments, "
+    "and only if necessary for grammar—prefer block quotes or labeled excerpts from the source.\n"
+    "- If you must organize the answer, use headings or bullets that quote or paste the source text under each "
+    "point rather than rewriting it.\n"
+    "Violation of these rules is unacceptable when ground response mode is active."
 )
 
 def run_research_agent(

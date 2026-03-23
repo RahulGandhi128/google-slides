@@ -60,69 +60,6 @@
   opacity: 0.85;
 }
 
-.chat-sidebar-settings-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.chat-sidebar-settings-btn {
-  flex: 1;
-  padding: 0.5rem 0.65rem;
-  font-size: 0.85rem;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s, color 0.15s;
-}
-
-.chat-sidebar-settings-btn:hover {
-  border-color: var(--accent);
-  background: var(--accent-muted);
-  color: var(--text-primary);
-}
-
-.chat-sidebar-settings-toggle {
-  flex-shrink: 0;
-  width: 36px;
-  height: 20px;
-  padding: 0;
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  background: var(--border);
-  position: relative;
-  transition: background 0.2s;
-}
-
-.chat-sidebar-settings-toggle.on {
-  background: var(--accent);
-}
-
-.chat-sidebar-settings-toggle-slider {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: white;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-  transition: transform 0.2s;
-}
-
-.chat-sidebar-settings-toggle.on .chat-sidebar-settings-toggle-slider {
-  transform: translateX(16px);
-}
-
 .chat-sidebar-header {
   margin: 0.25rem 0;
 }
@@ -1322,6 +1259,12 @@
   font-size: 0.8rem;
 }
 
+.input-attached-outline {
+  max-width: 260px;
+  background: rgba(168, 85, 247, 0.14);
+  border: 1px solid rgba(168, 85, 247, 0.45);
+}
+
 .input-attached-label {
   flex: 1;
   white-space: nowrap;
@@ -1452,6 +1395,87 @@
 .slide-outline-btn.find-replacements-btn {
   margin-left: 0.35rem;
   background: linear-gradient(135deg, #16a34a, #15803d);
+}
+
+/* Research mode: ground response toggle (next to Slide outline) */
+.ground-response-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-left: 0.35rem;
+  padding: 0.3rem 0.55rem 0.3rem 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.2;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary, #1e1e24);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.ground-response-toggle:hover:not(:disabled) {
+  border-color: var(--accent, #6366f1);
+  color: var(--text-primary);
+}
+
+.ground-response-toggle:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ground-response-toggle.on {
+  border-color: rgba(34, 197, 94, 0.55);
+  background: rgba(34, 197, 94, 0.12);
+  color: var(--text-primary);
+}
+
+.ground-response-toggle.off {
+  opacity: 0.92;
+}
+
+.ground-response-toggle-track {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: var(--border);
+}
+
+.ground-response-toggle.on .ground-response-toggle-track {
+  background: #22c55e;
+}
+
+.ground-response-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform 0.2s ease;
+}
+
+.ground-response-toggle.on .ground-response-toggle-knob {
+  transform: translateX(16px);
+}
+
+.ground-response-toggle-label {
+  max-width: 9rem;
+}
+
+@media (max-width: 640px) {
+  .ground-response-toggle-label {
+    display: none;
+  }
+  .ground-response-toggle {
+    padding: 0.3rem 0.45rem;
+  }
 }
 
 .chat-pinned-extraction-banner {
@@ -2003,6 +2027,234 @@
   background: var(--bg-secondary);
   border-color: var(--text-secondary);
   color: var(--text-primary);
+}
+
+/* Slide outline dialog: bigger, two-column layout */
+.slide-outline-dialog {
+  max-width: 820px;
+  width: 95vw;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 14px;
+}
+
+.slide-outline-dialog .settings-dialog-header {
+  padding: 1rem 1.5rem;
+}
+
+.slide-outline-dialog .settings-dialog-header h3 {
+  font-size: 1.1rem;
+}
+
+.slide-outline-dialog-body {
+  display: flex;
+  gap: 1.5rem;
+  padding: 1rem 1.5rem 1.25rem;
+  max-height: 65vh;
+  overflow: hidden;
+  flex: 1;
+  min-height: 0;
+}
+
+.slide-outline-saved-list {
+  flex-shrink: 0;
+  width: 220px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  padding-right: 1rem;
+  min-height: 0;
+}
+
+.slide-outline-saved-header {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  margin-bottom: 0.6rem;
+}
+
+.slide-outline-new-btn {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  background: var(--accent-muted);
+  color: var(--accent);
+  border: 1px dashed rgba(99, 102, 241, 0.5);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.slide-outline-new-btn:hover {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: var(--accent);
+}
+
+.slide-outline-saved-empty {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  font-style: italic;
+  padding: 0.5rem 0;
+}
+
+/* Saved outlines list: scrollable, invisible scrollbar */
+.slide-outline-saved-ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+  min-height: 120px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.slide-outline-saved-ul::-webkit-scrollbar {
+  display: none;
+}
+
+.slide-outline-saved-item {
+  display: flex;
+  align-items: center;
+  padding: 0.55rem 0.7rem;
+  border-radius: 8px;
+  margin-bottom: 0.15rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.slide-outline-saved-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.slide-outline-saved-item.selected {
+  background: var(--accent-muted);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+}
+
+.slide-outline-saved-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.88rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.35;
+}
+
+.slide-outline-form {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.slide-outline-form-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.slide-outline-form-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.slide-outline-delete-btn-inline {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  background: transparent;
+  color: var(--error);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.slide-outline-delete-btn-inline:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.slide-outline-delete-btn-inline:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.slide-outline-form .settings-field {
+  flex: 0 0 auto;
+}
+
+.slide-outline-form .settings-field:last-of-type {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.slide-outline-form .settings-field:last-of-type .settings-toggle-label {
+  margin-bottom: 0.5rem;
+}
+
+/* Form contents (slide rows): scrollable, invisible scrollbar */
+.slide-outline-form .slide-outline-rows {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 0.25rem;
+  margin-top: 0.5rem;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.slide-outline-form .slide-outline-rows::-webkit-scrollbar {
+  display: none;
+}
+
+.slide-outline-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  flex-shrink: 0;
+}
+
+.slide-outline-dirty-msg {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  flex: 1;
+}
+
+.slide-outline-footer-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Refined slide row styling */
+.slide-outline-form .slide-outline-row {
+  padding: 0.4rem 0;
+  border-radius: 6px;
+}
+
+.slide-outline-form .slide-outline-row:focus-within {
+  background: var(--bg-tertiary);
 }
 
 /* Design outline dialog (logo + Color Thief) */
