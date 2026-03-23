@@ -66,6 +66,8 @@ def generate_requests(
     start_rad = math.radians(start_angle_deg)
 
     child_ids: list[str] = []
+    text_pad_x = int(0.08 * EMU)
+    text_pad_y = int(0.06 * EMU)
 
     for i, step_text in enumerate(steps):
         angle_rad = start_rad + math.radians(i * step_deg)
@@ -76,6 +78,7 @@ def generate_requests(
         x = int(nx - node_w / 2)
         y = int(ny - node_h / 2)
         node_id = f"{id_prefix}_node_{i}"
+        text_id = f"{id_prefix}_node_text_{i}"
 
         # Create node (ROUND_RECTANGLE)
         requests.append({
@@ -113,10 +116,35 @@ def generate_requests(
             }
         })
 
+        # Inner text box (prebuilt text container inside the node)
+        text_w = max(int(0.35 * EMU), node_w - (2 * text_pad_x))
+        text_h = max(int(0.20 * EMU), node_h - (2 * text_pad_y))
+        requests.append({
+            "createShape": {
+                "objectId": text_id,
+                "shapeType": "TEXT_BOX",
+                "elementProperties": {
+                    "pageObjectId": page_object_id,
+                    "size": {
+                        "width": {"magnitude": text_w, "unit": "EMU"},
+                        "height": {"magnitude": text_h, "unit": "EMU"},
+                    },
+                    "transform": {
+                        "scaleX": 1,
+                        "scaleY": 1,
+                        "translateX": x + text_pad_x,
+                        "translateY": y + text_pad_y,
+                        "unit": "EMU",
+                    },
+                },
+            }
+        })
+        child_ids.append(text_id)
+
         # Label text
         requests.append({
             "insertText": {
-                "objectId": node_id,
+                "objectId": text_id,
                 "text": step_text,
                 "insertionIndex": 0,
             }

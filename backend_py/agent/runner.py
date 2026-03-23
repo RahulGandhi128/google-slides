@@ -214,6 +214,48 @@ TOOL_DECLARATIONS = [
             "required": ["presentationId", "pageObjectId", "steps"],
         },
     ),
+    FunctionDeclaration(
+        name="add_timeline_infographic",
+        description="Add a horizontal alternating timeline infographic (events along a bar with year labels + text cards above/below). Creates a grouped design. Returns success with groupObjectId.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "presentationId": {"type": "string", "description": "The presentation ID"},
+                "pageObjectId": {"type": "string", "description": "The slide's page object ID"},
+                "events": {
+                    "type": "array",
+                    "description": "Timeline events (recommended: dicts with {year, heading, body}).",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "year": {"type": "string"},
+                            "heading": {"type": "string"},
+                            "body": {"type": "string"},
+                        },
+                    },
+                },
+                "translateX": {"type": "integer", "description": "Left position in EMU (default: centered)"},
+                "translateY": {"type": "integer", "description": "Top position in EMU (default: ~50% vertically)"},
+                "themeColors": {
+                    "type": "object",
+                    "description": "Theme colors (hex). Used for timeline accent + text.",
+                    "properties": {
+                        "heading_color": {"type": "string"},
+                        "body_text_color": {"type": "string"},
+                        "background_color": {"type": "string"},
+                        "accent_color": {"type": "string"},
+                        "shapes_color": {"type": "string"},
+                        "charts_color": {"type": "string"},
+                    },
+                },
+                "colors": {"type": "array", "items": {"type": "string"}, "description": "Override: hex colors per event (optional)"},
+                "idPrefix": {"type": "string", "description": "Prefix for object IDs (default: timeline)"},
+                "totalWidthEmu": {"type": "integer", "description": "Full width of the bar in EMU"},
+                "barHeightEmu": {"type": "integer", "description": "Thickness of the timeline bar in EMU"},
+            },
+            "required": ["presentationId", "pageObjectId", "events"],
+        },
+    ),
 ]
 
 SYSTEM_INSTRUCTION = """You are a Google Workspace assistant for Slides and Drive, acting as a professional designer and content creator. Work step-by-step until the task is complete.
@@ -239,6 +281,7 @@ PREFER DESIGN INFOGRAPHIC TOOLS over manual createShape when the plan specifies 
 - If a slide's elements include type "process_infographic" (with steps array): call add_process_infographic(presentationId, pageObjectId, steps, orientation, themeColors). Do NOT build boxes+arrows manually via batch_update.
 - If elements include type "grid_infographic" (rows, columns, cells): call add_grid_infographic(presentationId, pageObjectId, rows, columns, cells, themeColors). Do NOT create individual rectangles for each cell.
 - If elements include type "circular_process_infographic" (steps array): call add_circular_process_infographic(presentationId, pageObjectId, steps, themeColors).
+- If elements include type "timeline_infographic" (events array): call add_timeline_infographic(presentationId, pageObjectId, events, themeColors).
 - For other content (titles, body text, icons, images, single decorative shapes): use presentations_batch_update with insertText, updateTextStyle, createShape, createImage, etc.
 
 BULLETED LISTS - For body text with bullets:
@@ -515,6 +558,40 @@ def _execute_add_circular_process_infographic(args: dict) -> dict:
         return {"success": False, "error": str(e)}
 
 
+def _execute_add_timeline_infographic(args: dict) -> dict:
+    """Execute add_timeline_infographic: generate requests and batch update."""
+    presentation_id = args.get("presentationId")
+    page_object_id = args.get("pageObjectId")
+    events = args.get("events") or []
+    if not presentation_id or not page_object_id:
+        return {"success": False, "error": "presentationId and pageObjectId are required"}
+    if not events or not isinstance(events, list):
+        return {"success": False, "error": "events (array) is required"}
+    try:
+        from gws.designs import timeline_requests
+
+        requests = timeline_requests(
+            page_object_id,
+            events,
+            translate_x=args.get("translateX"),
+            translate_y=args.get("translateY"),
+            theme_colors=args.get("themeColors") or {},
+            colors=args.get("colors"),
+            id_prefix=args.get("idPrefix") or "timeline",
+            total_width_emu=args.get("totalWidthEmu"),
+            bar_height_emu=args.get("barHeightEmu"),
+        )
+        if not requests:
+            return {"success": False, "error": "No events to render"}
+        reqs = _normalize_batch_requests(requests)
+        presentations_batch_update(presentation_id, reqs)
+        group_id = f"{args.get('idPrefix') or 'timeline'}_group"
+        return {"success": True, "groupObjectId": group_id, "eventsCount": len(events)}
+    except Exception as e:
+        log.warning("add_timeline_infographic failed: %s", e)
+        return {"success": False, "error": str(e)}
+
+
 def _execute_tool(name: str, args: dict) -> str:
     try:
         log.info("Tool called: %s | args: %s", name, args)
@@ -553,6 +630,8 @@ def _execute_tool(name: str, args: dict) -> str:
             r = _execute_add_grid_infographic(args)
         elif name == "add_circular_process_infographic":
             r = _execute_add_circular_process_infographic(args)
+        elif name == "add_timeline_infographic":
+            r = _execute_add_timeline_infographic(args)
         else:
             return f"Unknown tool: {name}"
         out = json.dumps(r, indent=2) if isinstance(r, dict) else str(r)

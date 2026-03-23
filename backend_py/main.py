@@ -467,7 +467,7 @@ async def execute_plan(request: dict):
         if design_instruction:
             plan_text += design_instruction.strip() + "\n\n"
         plan_text += "Slides to update (match by slide number / order):\n"
-        plan_text += "IMPORTANT: For elements with type process_infographic, grid_infographic, or circular_process_infographic, call the matching add_*_infographic tool—do NOT build them manually with createShape.\n\n"
+        plan_text += "IMPORTANT: For elements with type process_infographic, grid_infographic, circular_process_infographic, or timeline_infographic, call the matching add_*_infographic tool—do NOT build them manually with createShape.\n\n"
     else:
         # Deterministically scaffold a new presentation (theme + logos) BEFORE calling the agent,
         # so the LLM never has to handle data URLs and can't forget to add logos.
@@ -525,7 +525,7 @@ async def execute_plan(request: dict):
         if design_instruction:
             plan_text += design_instruction.strip() + "\n\n"
         plan_text += "Slides to update (match by slide number / order):\n"
-        plan_text += "IMPORTANT: For elements with type process_infographic, grid_infographic, or circular_process_infographic, call the matching add_*_infographic tool—do NOT build them manually with createShape.\n\n"
+        plan_text += "IMPORTANT: For elements with type process_infographic, grid_infographic, circular_process_infographic, or timeline_infographic, call the matching add_*_infographic tool—do NOT build them manually with createShape.\n\n"
 
     for s in slides:
         plan_text += f"\n--- Slide {s.get('slide_number', '?')}: {s.get('title', '')} ---\n"

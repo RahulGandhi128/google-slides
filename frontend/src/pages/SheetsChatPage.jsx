@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Link, useSearchParams } from 'react-router-dom';
+import { Button } from '@fluentui/react-components';
 
 import '../App.css';
 
@@ -236,9 +237,9 @@ export default function SheetsChatPage() {
             <h3>Chat history</h3>
           </div>
           <div className="chat-history-section">
-            <button type="button" className="chat-sidebar-change-btn" onClick={startNewChat}>
+            <Button className="chat-sidebar-change-btn" onClick={startNewChat} appearance="primary">
               New chat
-            </button>
+            </Button>
             {sessionsLoading ? (
               <p className="chat-sidebar-empty">Loading…</p>
             ) : chatSessions.length > 0 ? (
@@ -259,25 +260,27 @@ export default function SheetsChatPage() {
                         title={fullTitle}
                       >
                         <span className="chat-history-title">{shortTitle}</span>
-                        <button
+                        <Button
                           type="button"
                           className="chat-history-dots"
                           onClick={(e) => { e.stopPropagation(); setSessionMenuOpen(isMenuOpen ? null : s.id); }}
                           aria-label="Options"
+                          appearance="transparent"
                         >
                           ⋯
-                        </button>
+                        </Button>
                       </div>
                       {isMenuOpen && (
                         <div className="chat-history-menu" ref={sessionMenuRef}>
-                          <button
+                          <Button
                             type="button"
                             className="chat-history-menu-delete"
                             onClick={(e) => handleDeleteSession(s.id, e)}
                             disabled={isDeleting}
+                            appearance="subtle"
                           >
                             {isDeleting ? 'Deleting…' : 'Delete'}
-                          </button>
+                          </Button>
                         </div>
                       )}
                     </li>
@@ -291,7 +294,7 @@ export default function SheetsChatPage() {
 
           <div className="chat-sidebar-header chat-sidebar-divider" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
             <h3>Files</h3>
-            <button
+            <Button
               type="button"
               className="chat-sidebar-change-btn"
               onClick={fetchDriveFiles}
@@ -299,9 +302,10 @@ export default function SheetsChatPage() {
               title="Refresh file list"
               aria-label="Refresh file list"
               style={{ width: 'auto', padding: '0.25rem 0.5rem', flexShrink: 0 }}
+              appearance="transparent"
             >
               {driveFilesLoading ? '…' : '↻'}
-            </button>
+            </Button>
           </div>
           <div className="chat-sidebar-file">
             {selectedSheet && (
@@ -318,27 +322,29 @@ export default function SheetsChatPage() {
                 >
                   Open in Sheets
                 </a>
-                <button
+                <Button
                   type="button"
                   className="chat-sidebar-clear-btn"
                   onClick={clearSheet}
                   style={{ marginTop: 6, display: 'block' }}
+                  appearance="outline"
                 >
                   Clear
-                </button>
+                </Button>
               </div>
             )}
             {driveFiles.length > 0 ? (
               <ul className="chat-sidebar-file-list">
                 {driveFiles.map((f) => (
                   <li key={f.id}>
-                    <button
+                    <Button
                       type="button"
                       className={`chat-sidebar-file-item ${selectedSheet?.id === f.id ? 'selected' : ''}`}
                       onClick={() => selectSheet(f)}
+                      appearance="subtle"
                     >
                       {f.name}
-                    </button>
+                    </Button>
                   </li>
                 ))}
               </ul>
@@ -391,7 +397,7 @@ export default function SheetsChatPage() {
 
           <div className="input-inbox">
             <div className="input-inner">
-              <textarea
+              <Textarea
                 ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -409,9 +415,9 @@ export default function SheetsChatPage() {
             </div>
             <div className="input-footer">
               <div className="input-footer-left">
-                <button type="button" className="send-btn" disabled={!sendEnabled} onClick={sendMessage} aria-label="Send">
+                <Button type="button" className="send-btn" disabled={!sendEnabled} onClick={sendMessage} aria-label="Send" appearance="primary">
                   {isLoading ? 'Sending…' : 'Send'}
-                </button>
+                </Button>
               </div>
               <div className="input-footer-right" style={{ color: 'var(--text-secondary)', fontSize: '0.78rem' }}>
                 Tools are executed server-side via `gws` Sheets API.

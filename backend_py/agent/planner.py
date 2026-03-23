@@ -54,6 +54,7 @@ PREBUILT INFOGRAPHICS (prefer these over manual shapes when content fits):
 - process_infographic: Use for workflows, pipelines, step sequences (3–6 steps). Content: ordered list of step labels. Add when document has "steps", "phases", "stages", "pipeline", "flow", "process" with sequential items.
 - grid_infographic: Use for stat cards, feature comparisons, 2x2 or 2x3 or 3x2 matrices (2–6 cells). Add when document has side-by-side comparisons, statistics, feature lists that fit a grid.
 - circular_process_infographic: Use for cycles, recurring processes, 4–6 phases in a loop. Add when document describes "cycle", "loop", "phases", "recurring" with circular relationship.
+- timeline_infographic: Use for product milestones and timelines (3–7 events). Content: ordered list of event dicts (year, heading, body). Add when document describes a timeline, roadmap, phases over time, or milestones.
 When adding an infographic element, set layout and details to mention it explicitly (e.g. "Layout: Process flow infographic for 4 steps; title above." or "Details: Use add_process_infographic for the workflow; add_grid_infographic 2x2 for the comparison matrix.").
 
 SHAPES (use individual shapes when):
@@ -125,6 +126,7 @@ Element types:
 - process_infographic: steps (array of strings, 3–6 items), optional orientation ("horizontal"|"vertical"), optional translateX, translateY. Use for workflows, pipelines, step sequences. The builder will call add_process_infographic.
 - grid_infographic: rows, columns, cells (array of strings, row-major), optional translateX, translateY. Use for stat cards, feature matrices, 2x2 or 2x3 grids. The builder will call add_grid_infographic.
 - circular_process_infographic: steps (array of strings, 4–6 items), optional arrowCount, optional translateX, translateY. Use for cycles, phases, recurring processes. The builder will call add_circular_process_infographic.
+- timeline_infographic: events (array of objects with keys year, heading, body), optional translateX, translateY. Use for timelines/milestones. The builder will call add_timeline_infographic.
 
 Requirements:
 - For each slide: "layout", "details", "content", and "elements" with exact coordinates.
@@ -295,7 +297,7 @@ def generate_plan(
                     s["elements"][j] = {"type": "text_box", "left": 72, "top": 80, "width": 400, "height": 40, "content": ""}
                 else:
                     etype = el.get("type", "text_box")
-                    if etype in ("process_infographic", "grid_infographic", "circular_process_infographic"):
+                    if etype in ("process_infographic", "grid_infographic", "circular_process_infographic", "timeline_infographic"):
                         pass  # No left/top/width/height; infographics use steps/cells/rows/columns
                     else:
                         el.setdefault("left", 72)

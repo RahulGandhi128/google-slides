@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { Button, Spinner } from '@fluentui/react-components';
 import './DrivePage.css';
 
 const API_BASE = '/api';
@@ -82,14 +83,15 @@ function DrivePage() {
       <main className="drive-main">
         <div className="drive-toolbar">
           <h2>My Drive</h2>
-          <button
+          <Button
             className="drive-refresh-btn"
             onClick={() => fetchFiles(true)}
             disabled={loading || refreshing}
             title="Refresh from Drive"
+            appearance="primary"
           >
             {refreshing ? (
-              <span className="drive-refresh-spinner" />
+              <Spinner size="extra-tiny" />
             ) : (
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M23 4v6h-6M1 20v-6h6" />
@@ -97,12 +99,12 @@ function DrivePage() {
               </svg>
             )}
             Refresh
-          </button>
+          </Button>
         </div>
 
         {loading && !refreshing ? (
           <div className="drive-loading">
-            <div className="drive-spinner" />
+            <Spinner size="large" />
             <p>Loading files...</p>
           </div>
         ) : error ? (
@@ -153,7 +155,7 @@ function DrivePage() {
                   </a>
                   <span className="drive-list-col-action">
                     {isSlides && (
-                      <button
+                      <Button
                         type="button"
                         className="drive-edit-ai-btn"
                         onClick={(e) => {
@@ -161,9 +163,10 @@ function DrivePage() {
                           navigate(`/chat?fileId=${file.id}&fileName=${encodeURIComponent(file.name)}&mimeType=${file.mimeType || ''}`);
                         }}
                         title="Edit with AI Assistant"
+                        appearance="outline"
                       >
                         Edit with AI
-                      </button>
+                      </Button>
                     )}
                   </span>
                 </div>

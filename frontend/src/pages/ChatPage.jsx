@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { Button, Textarea, Spinner } from '@fluentui/react-components';
 import { Link, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import { getColor, getPalette } from 'colorthief';
@@ -14,7 +15,7 @@ function PlanCard({ slide, index }) {
 
   return (
     <div className="plan-card">
-      <button
+      <Button
         type="button"
         className={`plan-card-header ${open ? 'open' : ''}`}
         onClick={() => setOpen((o) => !o)}
@@ -23,7 +24,7 @@ function PlanCard({ slide, index }) {
         <span className="plan-card-number">Slide {slide.slide_number ?? index + 1}</span>
         <span className="plan-card-title">{slide.title || 'Untitled'}</span>
         <span className="plan-card-chevron">{open ? '▼' : '▶'}</span>
-      </button>
+      </Button>
       {open && (
         <div className="plan-card-body">
           {layout && (
@@ -82,14 +83,14 @@ function PlanDisplay({ plan, onProceed, isExecuting, buildMode, selectedFile }) 
         </div>
       )}
       <div className="plan-proceed-wrap">
-        <button
+        <Button
           type="button"
           className="plan-proceed-btn"
           onClick={onProceed}
           disabled={isExecuting || !canProceed}
         >
           {isExecuting ? (isModify ? 'Updating…' : 'Building…') : isModify ? 'Apply to this presentation' : 'Proceed — Build this presentation'}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -130,10 +131,10 @@ function MessageBubble({
       className={`message ${isUser ? 'message-user' : 'message-assistant'} message-mode-${mode}`}
     >
       <div className="message-avatar">
-        {isUser ? (
-          <span className="avatar-icon">U</span>
-        ) : (
-          <span className="avatar-icon assistant">{mode === 'design' ? 'D' : mode === 'research' ? 'R' : 'A'}</span>
+        {!isUser && (
+          <span className="avatar-icon assistant">
+            {mode === 'design' ? 'D' : mode === 'research' ? 'R' : 'A'}
+          </span>
         )}
       </div>
       <div className="message-content">
@@ -143,16 +144,12 @@ function MessageBubble({
           </div>
         )}
         {hasPlan ? (
-          <PlanDisplay
-            plan={message.plan}
-            onProceed={() => onProceedPlan(message.plan)}
-            isExecuting={isExecutingPlan}
-            buildMode={buildMode}
-            selectedFile={selectedFile}
-          />
+          <div className="message-plan-placeholder">
+            Plan ready — review/build from the sidebar.
+          </div>
         ) : isResearchWithContent && isEditingThis ? (
           <div className="message-research-edit">
-            <textarea
+            <Textarea
               className="message-research-edit-textarea"
               value={editingOutlineDraft}
               onChange={(e) => setEditingOutlineDraft(e.target.value)}
@@ -160,20 +157,20 @@ function MessageBubble({
               placeholder="Edit the research outline..."
             />
             <div className="message-research-edit-actions">
-              <button
+              <Button
                 type="button"
                 className="edit-outline-save-btn"
                 onClick={() => onSaveEditOutline(messageIndex, editingOutlineDraft)}
               >
                 Save
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 className="edit-outline-cancel-btn"
                 onClick={onCancelEditOutline}
               >
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
         ) : extractedSlides && extractedSlides.length > 0 ? (
@@ -188,13 +185,13 @@ function MessageBubble({
               ))}
             </div>
             {buildMode === 'modify' && onUseExtractionForReplacements && (
-              <button
+              <Button
                 type="button"
                 className="message-extracted-use-btn"
                 onClick={() => onUseExtractionForReplacements(extractedSlides)}
               >
                 Use for replacements
-              </button>
+              </Button>
             )}
           </div>
         ) : replacementSlides && replacementSlides.length > 0 ? (
@@ -244,29 +241,29 @@ function MessageBubble({
         )}
         {isResearchWithContent && onDesignOutline && !isEditingThis && (
           <div className="message-research-action">
-            <button
+            <Button
               type="button"
               className="edit-outline-btn"
               onClick={() => onEditOutline(messageIndex, message.content)}
             >
               Edit outline
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               className="design-outline-btn"
               onClick={() => onDesignOutline(message.content, messageIndex)}
               disabled={isDesigningThis}
             >
               {isDesigningThis ? 'Designing…' : 'Design this outline'}
-            </button>
+            </Button>
             {onReplyToMessage && (
-              <button
+              <Button
                 type="button"
                 className="reply-outline-btn"
                 onClick={() => onReplyToMessage(messageIndex, message.content)}
               >
                 Reply
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -281,6 +278,16 @@ function ChatPage() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isExecutingPlan, setIsExecutingPlan] = useState(false);
+  const [jobPlan, setJobPlan] = useState(null);
+  const [jobLogoOverridesSnapshot, setJobLogoOverridesSnapshot] = useState(null);
+  const [jobStep, setJobStep] = useState('idle'); // idle | plan_ready | scaffold_running | done | error
+  const [jobError, setJobError] = useState(null);
+  const jobsTotal = 4;
+  const planDone = jobStep !== 'idle';
+  const brandingDone = jobStep !== 'idle' && !!jobLogoOverridesSnapshot;
+  const scaffoldDone = jobStep === 'done';
+  const sheetsDone = jobStep === 'done';
+  const jobsDoneCount = [planDone, brandingDone, scaffoldDone, sheetsDone].filter(Boolean).length;
   const [designingOutlineIndex, setDesigningOutlineIndex] = useState(null);
   const [editingOutlineIndex, setEditingOutlineIndex] = useState(null);
   const [editingOutlineDraft, setEditingOutlineDraft] = useState('');
@@ -428,6 +435,10 @@ function ChatPage() {
   const startNewChat = () => {
     setSessionId(null);
     setMessages([]);
+    setJobPlan(null);
+    setJobLogoOverridesSnapshot(null);
+    setJobStep('idle');
+    setJobError(null);
     fetchChatSessions();
   };
 
@@ -995,6 +1006,12 @@ function ChatPage() {
       const data = await res.json();
       if (res.ok && data.sessionId) setSessionId(data.sessionId);
       fetchChatSessions();
+      if (data.plan) {
+        setJobPlan(data.plan);
+        setJobLogoOverridesSnapshot(logoOverrides);
+        setJobStep('plan_ready');
+        setJobError(null);
+      }
       setMessages((prev) => [
         ...prev,
         {
@@ -1167,6 +1184,8 @@ function ChatPage() {
     if (!plan || isExecutingPlan) return;
     if (buildMode === 'modify' && !selectedFile?.id) return;
     setIsExecutingPlan(true);
+    setJobStep('scaffold_running');
+    setJobError(null);
     const execMsg = {
       role: 'assistant',
       content: buildMode === 'modify' ? 'Updating your presentation from the plan…' : 'Building your presentation from the plan…',
@@ -1183,7 +1202,7 @@ function ChatPage() {
           sessionId,
           modifyExisting: buildMode === 'modify',
           currentFile: selectedFile ? { id: selectedFile.id, name: selectedFile.name, mimeType: selectedFile.mimeType } : null,
-          ...(logoOverrides && { logoOverrides }),
+          ...(jobLogoOverridesSnapshot && { logoOverrides: jobLogoOverridesSnapshot }),
           designSettings: {
             style: designSettings.style,
             maxLinesPerSlide: designSettings.maxLinesPerSlide,
@@ -1192,6 +1211,10 @@ function ChatPage() {
         }),
       });
       const data = await res.json();
+      if (!res.ok || data.error) {
+        const msg = data.detail || data.error || data.message?.content || 'Failed to build presentation';
+        throw new Error(msg);
+      }
 
       if (data.sessionId) setSessionId(data.sessionId);
       fetchChatSessions();
@@ -1208,7 +1231,10 @@ function ChatPage() {
         }
         return next;
       });
+      setJobStep('done');
     } catch (err) {
+      setJobStep('error');
+      setJobError(err?.message || 'Failed to build presentation');
       setMessages((prev) => {
         const next = [...prev];
         const idx = next.findIndex((m) => m === execMsg);
@@ -1277,6 +1303,12 @@ function ChatPage() {
         const data = await res.json();
         if (data.sessionId) setSessionId(data.sessionId);
         fetchChatSessions();
+        if (data.plan) {
+          setJobPlan(data.plan);
+          setJobLogoOverridesSnapshot(logoOverrides);
+          setJobStep('plan_ready');
+          setJobError(null);
+        }
         setMessages((prev) => [
           ...prev,
           {
@@ -1381,6 +1413,18 @@ function ChatPage() {
     adjustTextareaHeight();
   }, [input]);
 
+  // If a previous session already has a plan in chat history, allow building from it.
+  useEffect(() => {
+    if (jobStep !== 'idle') return;
+    const lastPlanMsg = [...messages].reverse().find((m) => m?.hasPlan && m?.plan);
+    if (lastPlanMsg?.plan) {
+      setJobPlan(lastPlanMsg.plan);
+      setJobLogoOverridesSnapshot(logoOverrides);
+      setJobStep('plan_ready');
+      setJobError(null);
+    }
+  }, [messages, jobStep, logoOverrides]);
+
   const handleKeyDown = (e) => {
     if (e.key === 'Escape') {
       setMentionOpen(false);
@@ -1403,13 +1447,13 @@ function ChatPage() {
             <h3>Chat history</h3>
           </div>
             <div className="chat-history-section">
-              <button
+              <Button
                 type="button"
                 className="chat-sidebar-change-btn"
                 onClick={startNewChat}
               >
                 New chat
-              </button>
+              </Button>
               {sessionsLoading ? (
                 <p className="chat-sidebar-empty">Loading…</p>
               ) : chatSessions.length > 0 ? (
@@ -1430,25 +1474,25 @@ function ChatPage() {
                           title={fullTitle}
                         >
                           <span className="chat-history-title">{shortTitle}</span>
-                          <button
+                          <Button
                             type="button"
                             className="chat-history-dots"
                             onClick={(e) => { e.stopPropagation(); setSessionMenuOpen(isMenuOpen ? null : s.id); }}
                             aria-label="Options"
                           >
                             ⋯
-                          </button>
+                          </Button>
                         </div>
                         {isMenuOpen && (
                           <div className="chat-history-menu" ref={sessionMenuRef}>
-                            <button
+                            <Button
                               type="button"
                               className="chat-history-menu-delete"
                               onClick={(e) => handleDeleteSession(s.id, e)}
                               disabled={isDeleting}
                             >
                               {isDeleting ? 'Deleting…' : 'Delete'}
-                            </button>
+                            </Button>
                           </div>
                         )}
                       </li>
@@ -1469,13 +1513,13 @@ function ChatPage() {
                     <ul className="chat-sidebar-file-list">
                       {driveFiles.map((f) => (
                         <li key={f.id}>
-                          <button
+                          <Button
                             type="button"
                             className={`chat-sidebar-file-item ${selectedFile?.id === f.id ? 'selected' : ''}`}
                             onClick={() => selectFile(f)}
                           >
                             {f.name}
-                          </button>
+                          </Button>
                         </li>
                       ))}
                     </ul>
@@ -1488,46 +1532,102 @@ function ChatPage() {
               </>
             )}
         </aside>
+        <aside className="chat-job-sidebar">
+          <div className="chat-sidebar-header chat-sidebar-divider">
+            <h3>Jobs done</h3>
+          </div>
+          <div className="chat-job-card">
+            <div className="chat-job-summary">
+              <div className="chat-job-summary-title">
+                {jobsDoneCount > 0 ? `Jobs done: ${jobsDoneCount}/${jobsTotal}` : 'No jobs yet'}
+              </div>
+              <div className="chat-job-summary-subtitle">
+                {jobStep === 'idle'
+                  ? 'Build from a plan to start'
+                  : jobStep === 'plan_ready'
+                    ? 'Plan ready'
+                    : jobStep === 'scaffold_running'
+                      ? 'Building…'
+                      : jobStep === 'done'
+                        ? 'Completed'
+                        : 'In progress'}
+              </div>
+            </div>
+
+            {jobPlan && (
+              <div className="chat-job-plan">
+                <div className="chat-job-plan-title">{jobPlan.title || 'Plan'}</div>
+                <div className="plan-accordion">
+                  {jobPlan.slides?.map((s, i) => (
+                    <PlanCard key={i} slide={s} index={i} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {jobPlan && jobStep === 'plan_ready' && (
+              <div className="chat-job-actions">
+                <Button
+                  type="button"
+                  className="chat-job-proceed-btn"
+                  onClick={() => executePlan(jobPlan)}
+                  disabled={isExecutingPlan || (buildMode === 'modify' && !selectedFile?.id)}
+                >
+                  {isExecutingPlan
+                    ? buildMode === 'modify'
+                      ? 'Applying…'
+                      : 'Building…'
+                    : buildMode === 'modify'
+                      ? 'Apply'
+                      : 'Build'}
+                </Button>
+                {jobError && <div className="chat-job-error">{jobError}</div>}
+              </div>
+            )}
+
+            {jobError && jobStep !== 'plan_ready' && <div className="chat-job-error">{jobError}</div>}
+          </div>
+        </aside>
         <main className="chat-container">
           <div className="mode-tabs-bar">
-            <button
+            <Button
               type="button"
               className={`mode-tab mode-tab-build ${buildMode === 'new' ? 'active' : ''}`}
               onClick={() => setBuildMode('new')}
             >
               <span className="mode-tab-label">New presentation</span>
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               className={`mode-tab mode-tab-build ${buildMode === 'modify' ? 'active' : ''}`}
               onClick={() => setBuildMode('modify')}
             >
               <span className="mode-tab-label">Modify existing</span>
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               className={`mode-tab mode-tab-research ${chatMode === 'research' ? 'active' : ''}`}
               onClick={() => setChatMode('research')}
             >
               <span className="mode-tab-icon mode-tab-icon-research">R</span>
               <span className="mode-tab-label">Research</span>
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               className={`mode-tab mode-tab-design ${chatMode === 'design' ? 'active' : ''}`}
               onClick={() => setChatMode('design')}
             >
               <span className="mode-tab-icon mode-tab-icon-design">D</span>
               <span className="mode-tab-label">Design</span>
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               className={`mode-tab mode-tab-agent ${chatMode === 'agent' ? 'active' : ''}`}
               onClick={() => setChatMode('agent')}
             >
               <span className="mode-tab-icon mode-tab-icon-agent">A</span>
               <span className="mode-tab-label">Agent</span>
-            </button>
+            </Button>
           </div>
           <div className="chat-scroll">
           {messages.length === 0 ? (
@@ -1641,14 +1741,14 @@ function ChatPage() {
               <span className="chat-pinned-extraction-text">
                 Using extraction ({pinnedExtractedSlides.length} slides). Add instructions and/or attach docs, then click Find replacements.
               </span>
-              <button
+              <Button
                 type="button"
                 className="chat-pinned-extraction-clear"
                 onClick={() => setPinnedExtractedSlides(null)}
                 aria-label="Clear"
               >
                 ×
-              </button>
+              </Button>
             </div>
           )}
           {buildMode === 'modify' && (
@@ -1667,7 +1767,7 @@ function ChatPage() {
                     >
                       Open in Slides
                     </a>
-                    <button
+                    <Button
                       type="button"
                       className="chat-current-file-card-change"
                       onClick={() => {
@@ -1677,8 +1777,8 @@ function ChatPage() {
                       disabled={driveFilesLoading}
                     >
                       {driveFilesLoading ? '…' : 'Change'}
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
                       className="chat-current-file-card-clear"
                       onClick={() => {
@@ -1689,13 +1789,13 @@ function ChatPage() {
                       aria-label="Clear selection"
                     >
                       ×
-                    </button>
+                    </Button>
                   </div>
                   {fileCardPickerOpen && driveFiles.length > 0 && (
                     <ul className="chat-current-file-card-dropdown">
                       {driveFiles.map((f) => (
                         <li key={f.id}>
-                          <button
+                          <Button
                             type="button"
                             className={`chat-current-file-card-item ${selectedFile?.id === f.id ? 'selected' : ''}`}
                             onClick={() => {
@@ -1704,7 +1804,7 @@ function ChatPage() {
                             }}
                           >
                             {f.name}
-                          </button>
+                          </Button>
                         </li>
                       ))}
                     </ul>
@@ -1713,7 +1813,7 @@ function ChatPage() {
               ) : (
                 <div className="chat-current-file-card-inner chat-current-file-card-select">
                   <span className="chat-current-file-card-name">Select a presentation</span>
-                  <button
+                  <Button
                     type="button"
                     className="chat-current-file-card-change"
                     onClick={() => {
@@ -1723,7 +1823,7 @@ function ChatPage() {
                     disabled={driveFilesLoading}
                   >
                     {driveFilesLoading ? 'Loading…' : 'Select'}
-                  </button>
+                  </Button>
                   {fileCardPickerOpen && (
                     <ul className="chat-current-file-card-dropdown">
                       {driveFiles.length === 0 ? (
@@ -1731,7 +1831,7 @@ function ChatPage() {
                       ) : (
                         driveFiles.map((f) => (
                           <li key={f.id}>
-                            <button
+                            <Button
                               type="button"
                               className="chat-current-file-card-item"
                               onClick={() => {
@@ -1740,7 +1840,7 @@ function ChatPage() {
                               }}
                             >
                               {f.name}
-                            </button>
+                            </Button>
                           </li>
                         ))
                       )}
@@ -1776,7 +1876,7 @@ function ChatPage() {
                 <div className="mention-item mention-item-muted">No documents found</div>
               ) : (
                 filteredMentionDocs.map((doc) => (
-                  <button
+                  <Button
                     key={doc.upload_id}
                     type="button"
                     className="mention-item"
@@ -1784,7 +1884,7 @@ function ChatPage() {
                   >
                     <span className="mention-item-name">{doc.filename}</span>
                     {doc.has_faiss && <span className="mention-item-badge">indexed</span>}
-                  </button>
+                  </Button>
                 ))
               )}
             </div>
@@ -1804,26 +1904,26 @@ function ChatPage() {
                   >
                     {`Presentation type: ${selectedSlideOutline.name}`}
                   </span>
-                  <button
+                  <Button
                     type="button"
                     className="input-attached-remove"
                     onClick={() => setSelectedSlideOutline(null)}
                     aria-label="Remove presentation type"
                   >
                     ×
-                  </button>
+                  </Button>
                 </div>
               )}
               {attachedDocuments.map((doc, idx) => (
                 <div key={doc.upload_id} className="input-attached">
                   <span className="input-attached-label" title={doc.filename}>{doc.filename}</span>
-                  <button type="button" className="input-attached-remove" onClick={() => setAttachedDocuments((prev) => prev.filter((_, i) => i !== idx))} aria-label="Remove">×</button>
+                  <Button type="button" className="input-attached-remove" onClick={() => setAttachedDocuments((prev) => prev.filter((_, i) => i !== idx))} aria-label="Remove">×</Button>
                 </div>
               ))}
             </div>
           )}
           <div className="input-inner">
-            <textarea
+            <Textarea
               ref={inputRef}
               value={input}
               onChange={handleInputChange}
@@ -1836,7 +1936,7 @@ function ChatPage() {
           </div>
           <div className="input-footer">
             <div className="input-footer-left">
-              <button
+              <Button
                 type="button"
                 className="input-icon-btn"
                 onClick={() => fileInputRef.current?.click()}
@@ -1847,9 +1947,9 @@ function ChatPage() {
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
                 </svg>
-              </button>
+              </Button>
               <div className="presentation-type-wrap" ref={presentationTypeMenuRef}>
-                <button
+                <Button
                   type="button"
                   className="presentation-type-btn"
                   onClick={() =>
@@ -1858,7 +1958,7 @@ function ChatPage() {
                   disabled={isLoading}
                 >
                   Presentation type ▾
-                </button>
+                </Button>
                 {presentationTypeMenuOpen && (
                   <div className="presentation-type-menu">
                     {savedSlideOutlines.length === 0 ? (
@@ -1867,29 +1967,29 @@ function ChatPage() {
                       </div>
                     ) : (
                       savedSlideOutlines.map((outline) => (
-                        <button
+                        <Button
                           key={outline.name}
                           type="button"
                           className="presentation-type-item"
                           onClick={() => handleSelectPresentationType(outline)}
                         >
                           {outline.name}
-                        </button>
+                        </Button>
                       ))
                     )}
                   </div>
                 )}
               </div>
-              <button
+              <Button
                 type="button"
                 className="slide-outline-btn"
                 onClick={handleOpenSlideOutlineDialog}
                 disabled={isLoading}
               >
                 Slide outline
-              </button>
+              </Button>
               {chatMode === 'research' && (
-                <button
+                <Button
                   type="button"
                   role="switch"
                   aria-checked={groundResponseEnabled}
@@ -1911,10 +2011,10 @@ function ChatPage() {
                     <span className="ground-response-toggle-knob" />
                   </span>
                   <span className="ground-response-toggle-label">Ground response</span>
-                </button>
+                </Button>
               )}
               {selectedFile && (
-                <button
+                <Button
                   type="button"
                   className="slide-outline-btn extract-btn"
                   onClick={handleExtractPresentation}
@@ -1922,10 +2022,10 @@ function ChatPage() {
                   title="Extract text from selected presentation"
                 >
                   {extractLoading ? 'Extracting…' : 'Extract'}
-                </button>
+                </Button>
               )}
               {pinnedExtractedSlides && pinnedExtractedSlides.length > 0 && (
-                <button
+                <Button
                   type="button"
                   className="slide-outline-btn find-replacements-btn"
                   onClick={handleFindReplacements}
@@ -1933,10 +2033,10 @@ function ChatPage() {
                   title="Find replacement content per slide from docs"
                 >
                   {findReplacementsLoading ? 'Finding…' : 'Find replacements'}
-                </button>
+                </Button>
               )}
             </div>
-            <button
+            <Button
               className="send-btn"
               onClick={sendMessage}
               disabled={(!input.trim() && !selectedSlideOutline) || isLoading}
@@ -1945,7 +2045,7 @@ function ChatPage() {
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
               </svg>
-            </button>
+            </Button>
           </div>
         </div>
           </div>
@@ -1962,31 +2062,31 @@ function ChatPage() {
           >
             <div className="settings-dialog-header">
               <h3>Design this outline</h3>
-              <button
+              <Button
                 type="button"
                 className="settings-dialog-close"
                 onClick={handleCloseDesignOutlineDialog}
                 aria-label="Close"
               >
                 ×
-              </button>
+              </Button>
             </div>
             <div className="settings-dialog-body">
               <div className="settings-tabs design-outline-tabs">
-                <button
+                <Button
                   type="button"
                   className={`settings-tab ${designOutlineTab === 'logos' ? 'active' : ''}`}
                   onClick={() => setDesignOutlineTab('logos')}
                 >
                   Logos
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
                   className={`settings-tab ${designOutlineTab === 'advanced' ? 'active' : ''}`}
                   onClick={() => setDesignOutlineTab('advanced')}
                 >
                   Advanced
-                </button>
+                </Button>
               </div>
               {designOutlineTab === 'logos' && (
                 <>
@@ -1994,7 +2094,7 @@ function ChatPage() {
                 <label htmlFor="design-outline-add-logos-toggle" className="settings-toggle-label">
                   Add logos to slides
                 </label>
-                <button
+                <Button
                   type="button"
                   role="switch"
                   id="design-outline-add-logos-toggle"
@@ -2003,7 +2103,7 @@ function ChatPage() {
                   onClick={() => setDesignOutlineAddLogosToSlides((v) => !v)}
                 >
                   <span className="settings-toggle-slider" />
-                </button>
+                </Button>
               </div>
               <p className="design-outline-dialog-desc">
                 Optional: upload an image or paste a logo URL. Target logo extracts a color palette for design. Logos are only added when the toggle above is on.
@@ -2048,14 +2148,14 @@ function ChatPage() {
                       alt="Logo preview"
                       className="design-outline-logo-preview"
                     />
-                    <button
+                    <Button
                       type="button"
                       className="design-outline-clear-btn"
                       onClick={() => handleClearDesignOutlineLogo('my')}
                       aria-label="Remove your logo"
                     >
                       ×
-                    </button>
+                    </Button>
                   </div>
                 )}
                 <div className="design-outline-corner-row">
@@ -2112,14 +2212,14 @@ function ChatPage() {
                       alt="Target logo preview"
                       className="design-outline-logo-preview"
                     />
-                    <button
+                    <Button
                       type="button"
                       className="design-outline-clear-btn"
                       onClick={() => handleClearDesignOutlineLogo('target')}
                       aria-label="Remove target logo"
                     >
                       ×
-                    </button>
+                    </Button>
                   </div>
                 )}
                 <div className="design-outline-corner-row">
@@ -2213,7 +2313,7 @@ function ChatPage() {
                     </div>
                   </div>
                   <div className="design-outline-advanced-actions">
-                    <button
+                    <Button
                       type="button"
                       className="edit-outline-cancel-btn"
                       onClick={() => {
@@ -2226,8 +2326,8 @@ function ChatPage() {
                       }}
                     >
                       Restore defaults
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
                       className="settings-upload-btn"
                       onClick={async () => {
@@ -2243,28 +2343,28 @@ function ChatPage() {
                       disabled={designOutlineSavingBranding}
                     >
                       {designOutlineSavingBranding ? 'Saving…' : 'Save settings'}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
             </div>
             <div className="settings-dialog-footer">
-              <button
+              <Button
                 type="button"
                 className="settings-upload-btn"
                 onClick={handleDesignOutlineConfirm}
                 disabled={designOutlineSavingBranding}
               >
                 {designOutlineSavingBranding ? 'Saving…' : (designOutlineExtracted ? 'Design with these colors' : 'Design')}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 className="edit-outline-cancel-btn"
                 onClick={handleCloseDesignOutlineDialog}
                 disabled={designOutlineSavingBranding}
               >
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -2280,19 +2380,19 @@ function ChatPage() {
           >
             <div className="settings-dialog-header">
               <h3>Slide outline template</h3>
-              <button
+              <Button
                 type="button"
                 className="settings-dialog-close"
                 onClick={() => setSlideOutlineDialogOpen(false)}
                 aria-label="Close"
               >
                 ×
-              </button>
+              </Button>
             </div>
             <div className="settings-dialog-body slide-outline-dialog-body">
               <div className="slide-outline-saved-list">
                 <div className="slide-outline-saved-header">Saved outlines</div>
-                <button
+                <Button
                   type="button"
                   className="slide-outline-new-btn"
                   onClick={() => {
@@ -2304,7 +2404,7 @@ function ChatPage() {
                   }}
                 >
                   + New outline
-                </button>
+                </Button>
                 {savedSlideOutlines.length === 0 ? (
                   <div className="slide-outline-saved-empty">No saved outlines yet</div>
                 ) : (
@@ -2332,14 +2432,14 @@ function ChatPage() {
                     {editingSlideOutlineId ? 'Edit outline' : 'New outline'}
                   </h4>
                   {editingSlideOutlineId && (
-                    <button
+                    <Button
                       type="button"
                       className="slide-outline-delete-btn-inline"
                       onClick={handleDeleteSlideOutline}
                       disabled={deletingSlideOutlineId === editingSlideOutlineId}
                     >
                       {deletingSlideOutlineId === editingSlideOutlineId ? 'Deleting…' : 'Delete'}
-                    </button>
+                    </Button>
                   )}
                 </div>
                 <div className="settings-field">
@@ -2381,7 +2481,7 @@ function ChatPage() {
                             )
                           }
                         />
-                        <textarea
+                        <Textarea
                           className="settings-input slide-outline-guidance-input"
                           placeholder="Guidance / what to fill in this slide"
                           rows={2}
@@ -2395,24 +2495,24 @@ function ChatPage() {
                           }
                         />
                         {slideOutlineSlides.length > 1 && (
-                          <button
+                          <Button
                             type="button"
                             className="slide-outline-remove-btn"
                             onClick={() => handleRemoveSlideRow(idx)}
                             aria-label="Remove slide"
                           >
                             ×
-                          </button>
+                          </Button>
                         )}
                       </div>
                     ))}
-                    <button
+                    <Button
                       type="button"
                       className="slide-outline-add-btn"
                       onClick={handleAddSlideRow}
                     >
                       + Add slide
-                    </button>
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -2428,21 +2528,21 @@ function ChatPage() {
                 </span>
               )}
               <div className="slide-outline-footer-actions">
-                <button
+                <Button
                   type="button"
                   className="settings-upload-btn"
                   onClick={handleSaveSlideOutline}
                   disabled={!isSlideOutlineDirty || slideOutlineSaveStatus === 'saving'}
                 >
                   {slideOutlineSaveStatus === 'saving' ? 'Saving…' : 'Save'}
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
                   className="edit-outline-cancel-btn"
                   onClick={() => setSlideOutlineDialogOpen(false)}
                 >
                   Close
-                </button>
+                </Button>
               </div>
             </div>
           </div>
