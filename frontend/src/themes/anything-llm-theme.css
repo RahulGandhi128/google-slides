@@ -1,0 +1,296 @@
+/**
+ * AnythingLLM-inspired UI (dark sidebar + chat surface).
+ * Color tokens aligned with Mintplex-Labs/anything-llm tailwind (sidebar #25272C, etc.)
+ * https://github.com/Mintplex-Labs/anything-llm
+ */
+
+body.allm-theme-body {
+  background: #141414;
+  color: #d2d5db;
+}
+
+/* Root shell */
+.allm-theme.app {
+  background: #141414;
+  color: #e5e7eb;
+  font-family: 'Plus Jakarta Sans', -apple-system, system-ui, sans-serif;
+}
+
+.allm-theme .chat-layout {
+  background: #141414;
+}
+
+/* Sidebars — AnythingLLM sidebar */
+.allm-theme .chat-sidebar,
+.allm-theme .chat-job-sidebar {
+  background: #25272c !important;
+  border-color: #4e5153 !important;
+  color: #d2d5db;
+}
+
+.allm-theme .chat-sidebar-header h3,
+.allm-theme .chat-job-header h3 {
+  color: #9ca3af !important;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 0.7rem !important;
+}
+
+.allm-theme .chat-sidebar-logo {
+  border-bottom-color: #4e5153 !important;
+}
+
+.allm-theme .chat-sidebar-change-btn {
+  background: #31353a !important;
+  border: 1px solid #4e5153 !important;
+  color: #e5e7eb !important;
+  border-radius: 8px !important;
+}
+
+.allm-theme .chat-sidebar-change-btn:hover:not(:disabled) {
+  background: #3d4147 !important;
+  border-color: #5b616a !important;
+}
+
+.allm-theme .chat-history-card,
+.allm-theme .chat-sidebar-file-item.chat-history-card {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+}
+
+.allm-theme .chat-history-card:hover,
+.allm-theme .chat-sidebar-file-item.chat-history-card:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+
+.allm-theme .chat-history-card.selected,
+.allm-theme .chat-sidebar-file-item.chat-history-card.selected {
+  background: linear-gradient(90deg, #3d4147 0%, #2c2f35 100%) !important;
+  border-color: #4e5153 !important;
+}
+
+.allm-theme .chat-history-title {
+  color: #d2d5db !important;
+}
+
+.allm-theme .chat-sidebar-empty {
+  color: #6b7280 !important;
+}
+
+.allm-theme .chat-sidebar-collapse-btn,
+.allm-theme .chat-sidebar-expand-floating,
+.allm-theme .chat-job-sidebar-expand-floating {
+  background: #31353a !important;
+  border-color: #4e5153 !important;
+  color: #d2d5db !important;
+}
+
+.allm-theme .chat-sidebar-collapse-btn:hover,
+.allm-theme .chat-sidebar-expand-floating:hover,
+.allm-theme .chat-job-sidebar-expand-floating:hover {
+  background: #3d4147 !important;
+  color: #f4f4f4 !important;
+}
+
+/* Main chat column */
+.allm-theme .chat-container {
+  background: #1c1e21 !important;
+  border-left-color: #4e5153 !important;
+  border-right-color: #4e5153 !important;
+}
+
+.allm-theme .chat-scroll {
+  background: #1c1e21;
+}
+
+/* Mode tabs */
+.allm-theme .mode-tabs-bar {
+  border-bottom: 1px solid #4e5153;
+}
+
+.allm-theme .mode-tab {
+  color: #9ca3af !important;
+}
+
+.allm-theme .mode-tab.active {
+  background: #31353a !important;
+  border: 1px solid #4e5153 !important;
+  color: #f4f4f4 !important;
+}
+
+/* Messages */
+.allm-theme .message-text,
+.allm-theme .message-text p {
+  color: #e5e7eb !important;
+}
+
+.allm-theme .message-mode-label {
+  color: #9ca3af !important;
+}
+
+.allm-theme .message-user .message-text {
+  color: #f4f4f4 !important;
+}
+
+.allm-theme .message-mode-agent.message-user,
+.allm-theme .message-mode-design.message-user,
+.allm-theme .message-mode-research.message-user {
+  background: transparent !important;
+}
+
+.allm-theme .message-user .avatar-icon {
+  background: linear-gradient(180deg, #3d4147 0%, #2c2f35 100%) !important;
+  color: #fff !important;
+}
+
+.allm-theme .avatar-icon.assistant {
+  background: #0ba5ec !important;
+  color: #fff !important;
+}
+
+/* Input area */
+.allm-theme .input-area-inline,
+.allm-theme .input-inbox {
+  background: #18181b !important;
+  border: 1px solid #4e5153 !important;
+  border-radius: 12px !important;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35) !important;
+}
+
+.allm-theme .input-inbox:focus-within {
+  border-color: #3d4147 !important;
+  box-shadow: 0 0 0 1px rgba(11, 165, 236, 0.25) !important;
+}
+
+.allm-theme .input-inner {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.allm-theme .chat-textarea,
+.allm-theme .input-inner [class*='fui-Textarea'] {
+  color: #e5e7eb !important;
+}
+
+.allm-theme .chat-textarea::placeholder,
+.allm-theme .input-inner [class*='fui-Textarea']::placeholder {
+  color: #6b7280 !important;
+}
+
+/* Jobs / plan panel */
+.allm-theme .chat-job-card {
+  background: #25272c !important;
+  border: 1px solid #4e5153 !important;
+  border-radius: 12px;
+}
+
+.allm-theme .chat-job-summary-title {
+  color: #f4f4f4 !important;
+}
+
+.allm-theme .chat-job-summary-subtitle {
+  color: #9ca3af !important;
+}
+
+.allm-theme .chat-job-plan-title {
+  color: #d2d5db !important;
+}
+
+.allm-theme .plan-card {
+  background: #1c1e21 !important;
+  border: 1px solid #4e5153 !important;
+  border-radius: 10px;
+}
+
+.allm-theme .plan-card-header {
+  color: #e5e7eb !important;
+}
+
+.allm-theme .message-plan-title,
+.allm-theme .plan-card-title {
+  color: #e5e7eb !important;
+}
+
+.allm-theme .plan-card-body,
+.allm-theme .plan-card-section {
+  color: #d2d5db !important;
+}
+
+.allm-theme .plan-proceed-btn,
+.allm-theme .chat-job-proceed-btn,
+.allm-theme .plan-proceed-btn[class*='fui-Button'] {
+  background: #0ba5ec !important;
+  color: #fff !important;
+  border: none !important;
+}
+
+.allm-theme .plan-proceed-btn:hover {
+  filter: brightness(1.08);
+}
+
+/* Welcome / empty states */
+.allm-theme .welcome,
+.allm-theme .chat-empty {
+  color: #9ca3af !important;
+}
+
+/* Settings overlays */
+.allm-theme .settings-overlay {
+  background: rgba(0, 0, 0, 0.65) !important;
+}
+
+.allm-theme .settings-dialog {
+  background: linear-gradient(180deg, #3d4147 0%, #2c2f35 100%) !important;
+  border: 1px solid #4e5153 !important;
+  color: #e5e7eb !important;
+}
+
+.allm-theme .settings-dialog h3,
+.allm-theme .settings-dialog-header h3 {
+  color: #f4f4f4 !important;
+}
+
+.allm-theme .settings-input,
+.allm-theme .settings-dialog input,
+.allm-theme .settings-dialog textarea {
+  background: #18181b !important;
+  border-color: #4e5153 !important;
+  color: #e5e7eb !important;
+}
+
+.allm-theme .settings-toggle-label {
+  color: #d2d5db !important;
+}
+
+.allm-theme .chat-history-menu {
+  background: #31353a !important;
+  border: 1px solid #4e5153 !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+/* Scrollbars (WebKit) */
+.allm-theme .chat-sidebar::-webkit-scrollbar,
+.allm-theme .chat-job-sidebar::-webkit-scrollbar,
+.allm-theme .chat-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.allm-theme .chat-sidebar::-webkit-scrollbar-thumb,
+.allm-theme .chat-job-sidebar::-webkit-scrollbar-thumb,
+.allm-theme .chat-scroll::-webkit-scrollbar-thumb {
+  background: #4e5153;
+  border-radius: 4px;
+}
+
+/* Fluent primary buttons in chat */
+.allm-theme [class*='fui-Button'].fui-Button-primary,
+.allm-theme button[aria-label='Send']:not([disabled]) {
+  --color: #fff;
+}
+
+/* Logo contrast on dark sidebar */
+.allm-theme .chat-sidebar-logo .app-logo-img {
+  filter: brightness(1.05);
+}
